@@ -70,7 +70,7 @@ Either path works; pick what you have. You keep all prompts, files, and billing 
 **Requirements:**
 
 - Cloudflare account (free plan is fine; sign up at [cloudflare.com](https://cloudflare.com))
-- Node 18+ installed (`node --version`)
+- Node 22+ installed (`node --version`)
 - **One of:**
   - Claude Code installed and logged in (`claude login` in your terminal), OR
   - Anthropic API key (set `ANTHROPIC_API_KEY` environment variable)

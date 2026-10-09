@@ -9,11 +9,12 @@
   "scripts": {
     "build": "./build.sh",
     "deploy": "./deploy.sh",
-    "start": "./run.sh"
+    "start": "./run.sh",
+    "test": "./check.sh"
   },
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "playwright": "^1.47.0"

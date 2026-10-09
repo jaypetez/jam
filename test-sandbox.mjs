@@ -145,9 +145,15 @@ for (const t of tests) {
 // port, so a role that reaches the approval flow fails closed (exit 2); a trusted role exits 0 before any network.
 import { spawnSync } from "node:child_process";
 const hookPath = path.resolve("approve-hook.mjs");
+// The scheduler exemption needs ~/.jam/nightly.sha256 to match the repo's nightly.sh. That pin is owner machine state, so these cases
+// used to pass only on the author's Mac and failed on every fresh CI runner (2026-10-09: main's `check` job red on #1/#3/#4). Give the hook a
+// throwaway HOME holding the right pin instead of inheriting the real one.
+const pinHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pinhome-")));
+fs.mkdirSync(path.join(pinHome, ".jam"), { recursive: true });
+fs.writeFileSync(path.join(pinHome, ".jam", "nightly.sha256"), (await import("node:crypto")).createHash("sha256").update(fs.readFileSync(path.resolve("nightly.sh"))).digest("hex") + "\n");
 const runHook = (role, command) => spawnSync("node", [hookPath], {
   input: JSON.stringify({ tool_name: "Bash", tool_input: { command } }),
-  env: { ...process.env, JAM_FROM_ROLE: role, JAM_HOST: "127.0.0.1:9", JAM_KEY: "x", JAM_ROOM: "test-qa-x", JAM_CWD: workdir },
+  env: { ...process.env, HOME: pinHome, USERPROFILE: pinHome, JAM_FROM_ROLE: role, JAM_HOST: "127.0.0.1:9", JAM_KEY: "x", JAM_ROOM: "test-qa-x", JAM_CWD: workdir },
   encoding: "utf8", timeout: 20000 }).status;
 const nightlyCmd = "cd ~/claude/jam && ./nightly.sh > /tmp/nightly.out 2>&1; cat /tmp/nightly.out";
 const NIGHTLY = "cd ~/claude/jam && ./nightly.sh > /tmp/nightly.out 2>&1; echo \"EXIT=$?\" >> /tmp/nightly.out; cat /tmp/nightly.out";

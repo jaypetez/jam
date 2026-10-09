@@ -20,7 +20,7 @@ npx markdownlint-cli2 "**/*.md" "#node_modules"   # Markdown lint (config: .mark
 actionlint                 # workflow lint; or: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color
 ```
 
-- CI (`.github/workflows/ci.yml`) has two jobs, both required on `main`: `check` (`npm ci && ./check.sh` on Node 18) and `lint` (markdownlint-cli2 over all Markdown, plus actionlint).
+- CI (`.github/workflows/ci.yml`) has two jobs, both required on `main`: `check` (`npm ci && ./check.sh` on Node 22; the bridge needs the global `WebSocket`, which Node 18 and 20 lack) and `lint` (markdownlint-cli2 over all Markdown, plus actionlint).
 - `check.sh` runs only the unit tests and `test-sandbox*`/`test-runlocal`/`test-harmful` listed above. `auth`, `compact`, `switch`, `reconnect` and `runlocal` `.test.mjs`, plus the other `test-*.mjs` (boot, cobrowse, upload, status-bar, single-bridge), are not in the gate; run them by hand with `node <file>` when touching that area (`run-tests.sh` drives several of them against the live Worker).
 - `check.sh` assumes macOS/Linux. Under Windows Git Bash, the exec-bit guard false-fails on any shebang file stored as `100644` (e.g. `auth.test.mjs`), and several hook/sandbox tests fail on Windows paths. Use WSL, or run the pure unit tests individually.
 - Unit tests are plain Node scripts with no test framework; each prints a pass/fail summary and exits non-zero on failure.

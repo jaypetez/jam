@@ -14,14 +14,15 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "jam: FAIL exec-bi
 EXEC_FILES=$(
   { git ls-files -s | awk -F'\t' '$1 ~ /^100755 /{print $2}'
     grep -hoE '\./[A-Za-z0-9_][A-Za-z0-9_.-]*\.(sh|mjs|cjs|js)' *.sh package.json .github/workflows/*.yml 2>/dev/null | sed 's|^\./||'
-    git ls-files | while IFS= read -r t; do [ -f "$t" ] && [ -x "$t" ] && printf '%s\n' "$t"; done
+    # (C) is skipped on Windows: Git Bash reports every file as -x there, so it would flag every 100644 file with a shebang (e.g. auth.test.mjs).
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) git ls-files | while IFS= read -r t; do [ -f "$t" ] && [ -x "$t" ] && printf '%s\n' "$t"; done;; esac
   } | sort -u
 )
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   [ -e "$f" ] || continue
   [ -L "$f" ] && continue                        # tracked symlinks are 120000 by design, not a mode bug
-  if [ ! -x "$f" ]; then
+  if [ ! -x "$f" ] && ! case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) true;; *) false;; esac; then
     echo "jam: FAIL $f is not executable - chmod +x $f (python3 os.replace drops the exec bit)" >&2; exit 1
   fi
   MODE=$(git ls-files -s -- ":(literal)$f" | awk 'NR==1{print $1}')
@@ -55,6 +56,9 @@ node test-sandbox.mjs
 node test-sandbox-exec.mjs
 node test-runlocal.mjs
 node test-harmful.mjs
+node test-single-bridge.mjs   # offline: throwaway HOME + unroutable host; the newest full-scope bridge must stop the older one
+# Driver-env guard (2026-10-09 review): a driver turn's claude must never inherit JAM_KEY when .jam-key exists on disk (the hook reads the key from there).
+grep -qF 'item.role === "driver" && existsSync(path.join(here, ".jam-key"))) delete env.JAM_KEY' bridge.mjs || { echo "jam: FAIL bridge.mjs no longer deletes JAM_KEY from the driver turn env (key leak off-macOS / with JAM_DRIVER_SANDBOX=off)" >&2; exit 1; }
 node -e "new Function(require('fs').readFileSync('ui.html','utf8').match(/<script>([\s\S]*)<\/script>/)[1])"
 ./build.sh >/dev/null && node --check worker.js
 # Self-update regression guard: build.sh's sed substitutes every literal occurrence of __BUILD__, so any client-
