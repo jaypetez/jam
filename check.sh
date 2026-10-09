@@ -39,7 +39,7 @@ while IFS= read -r f; do
 done <<EOF
 $EXEC_FILES
 EOF
-node --check worker.src.js && node --check bridge.mjs && node --check approve-hook.mjs && node --check route.mjs && node --check catalog.mjs && node --check tune-router.mjs && node --check schedule.mjs && node --check browser.mjs && node --check budget.mjs && for m in turntext turn-events turn-policy models session-store compaction room-dispatch uploads schedule-cli sandbox; do node --check "$m.mjs"; done
+node --check worker.src.js && node --check bridge.mjs && node --check approve-hook.mjs && node --check route.mjs && node --check catalog.mjs && node --check tune-router.mjs && node --check schedule.mjs && node --check browser.mjs && node --check budget.mjs && for m in turntext turn-events turn-policy models session-store compaction room-dispatch uploads schedule-cli sandbox worker-lib; do node --check "$m.mjs"; done
 node route.test.mjs
 node catalog.test.mjs
 node tune-router.test.mjs
@@ -66,6 +66,11 @@ node test-single-bridge.mjs   # offline: throwaway HOME + unroutable host; the n
 grep -qF 'item.role === "driver" && existsSync(path.join(here, ".jam-key"))) delete env.JAM_KEY' bridge.mjs || { echo "jam: FAIL bridge.mjs no longer deletes JAM_KEY from the driver turn env (key leak off-macOS / with JAM_DRIVER_SANDBOX=off)" >&2; exit 1; }
 node -e "new Function(require('fs').readFileSync('ui.html','utf8').match(/<script>([\s\S]*)<\/script>/)[1])"
 ./build.sh >/dev/null && node --check worker.js
+# worker.js is a committed build artifact. In CI (clean checkout) a rebuild that differs from what was committed means someone edited ui.html,
+# worker.src.js, budget.mjs, worker-lib.mjs or inline-modules.txt and forgot to commit the regenerated bundle. Locally the tree is usually dirty, so only CI enforces it.
+if [ -n "${CI:-}" ] && ! git diff --quiet -- worker.js; then echo "jam: FAIL worker.js is stale: run ./build.sh and commit the regenerated worker.js" >&2; git diff --stat -- worker.js >&2; exit 1; fi
+node worker-lib.test.mjs
+node test-worker-hub.mjs | tail -3   # offline: imports the BUILT worker.js and drives Hub REST + auth routing with a fake Durable Object runtime
 # Self-update regression guard: build.sh's sed substitutes every literal occurrence of __BUILD__, so any client-
 # side check written as `BUILD!=="__BUILD__"` becomes `<hash>!=="<hash>"` after a build — always false, dead code
 # that silently disables the tab auto-reload path (shipped broken since e3b033b, found 2026-09-10). Fail loud if
