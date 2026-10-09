@@ -13,3 +13,6 @@ nohup.out
 .dev.vars
 .github/
 This is test. This is only a test./
+.editorconfig
+.gitattributes
+.markdownlint.jsonc

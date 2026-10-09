@@ -1,11 +1,13 @@
 # jam — shared Claude Code sessions
 
+[![CI](https://github.com/jaypetez/jam/actions/workflows/ci.yml/badge.svg)](https://github.com/jaypetez/jam/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Several people, one Claude Code session, from any browser. Each **room** is a Claude Code session running in one
 directory on a machine you control (the **host**). People join with a short invite link, everyone sees the same
 streamed transcript, tool calls, uploads, and each other typing. Claude sees every message tagged with who said it.
 
-
-```
+```text
  browser ──┐                                       ┌── claude -p --resume … (room A)
  browser ──┼─ wss ─▶ Cloudflare Worker + DOs ◀─ wss ─┤   bridge on the host
  browser ──┘         (rooms, transcript, invites)     └── claude -p --resume … (room B)
@@ -53,6 +55,7 @@ Native Claude Code is single-user. jam sidesteps that using one Claude subscript
 ## Credentials & cost
 
 **You bring your own Claude.** The bridge runs `claude` CLI on your machine using one of two auth paths:
+
 - **Claude subscription:** Already logged in? `claude login` works. The bridge inherits your session.
 - **Anthropic API key:** Set `ANTHROPIC_API_KEY` in your shell, then run the bridge. Full billing goes to your Anthropic console account.
 
@@ -65,6 +68,7 @@ Either path works; pick what you have. You keep all prompts, files, and billing 
 ## Setup (about five minutes)
 
 **Requirements:**
+
 - Cloudflare account (free plan is fine; sign up at [cloudflare.com](https://cloudflare.com))
 - Node 18+ installed (`node --version`)
 - **One of:**
@@ -87,7 +91,6 @@ Then open the **Lobby URL** printed by `setup.sh` in your browser. Create a room
 - **Without wrangler:** Fill in `CF_ACCOUNT_ID` and `CF_API_TOKEN` in `.env` (see `.env.example`), then `./setup.sh`. ([How to get API tokens](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/))
 
 Then open the lobby link, create a room (name + directory on the host + optional model), open it, and hit **Invite**.
-
 
 ### Custom domain
 
@@ -122,6 +125,8 @@ disconnected immediately. "Sign out" in the sidebar forgets the key on that devi
 
 ## Security
 
+**Found a vulnerability?** Please report it privately — see [SECURITY.md](SECURITY.md). Do not open a public issue.
+
 The bridge runs Claude with permissions skipped, in the room's directory, on your machine. Owners are trusted
 completely. Drivers are gated by the approval hook (`approve-hook.mjs`, a Claude Code PreToolUse hook) for the
 patterns listed at the top of that file; extend the list to taste. It's a guardrail, not a sandbox: a determined
@@ -152,6 +157,11 @@ couldn't deliver and replays them.
 Sessions persist in `~/.jam/sessions/<room>.json`; delete one to start that room fresh. Uploads in
 `~/.jam/uploads/<room>/`. Transcripts live in the Room DO.
 
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and note
+that this project follows a [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
-MIT — see `LICENSE`.
+MIT — see [`LICENSE`](LICENSE).

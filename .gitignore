@@ -1,5 +1,7 @@
 .jam-key
 .env
+.env.*
+!.env.example
 .dev.vars
 bridge.log
 nohup.out
@@ -7,3 +9,17 @@ logs/
 node_modules/
 .wrangler/
 ui.html.bak
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs
+*.log

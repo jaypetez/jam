@@ -5,26 +5,31 @@ The scheduler allows you to define recurring prompts that run automatically on a
 ## Quick Start
 
 Add a daily regression check at 09:00 UTC:
+
 ```bash
 node bridge.mjs --add-schedule jam "run ./check.sh and ./run-tests.sh" "0 9 * * *"
 ```
 
 Pin a schedule to a model tier (skips auto-routing; `light` = Haiku 4.5, `medium` = Sonnet 5, `heavy` = Fable 5.1):
+
 ```bash
 node bridge.mjs --add-schedule jam "run ./check.sh and ./run-tests.sh" "0 9 * * *" --tier medium
 ```
 
 List all schedules:
+
 ```bash
 node bridge.mjs --list-schedules
 ```
 
 Remove a specific schedule:
+
 ```bash
 node bridge.mjs --remove-schedule jam "0 9 * * *"
 ```
 
 Remove all schedules for a room:
+
 ```bash
 node bridge.mjs --remove-schedule jam
 ```
@@ -36,13 +41,14 @@ node bridge.mjs --remove-schedule jam
 3. **Execution**: Matching schedules are queued as messages in the room (like any other turn)
 4. **Routing**: Scheduled turns are marked with `role: "scheduler"` and are floored to **medium tier** (Sonnet 5): the prompt is scored as usual, then raised to medium if it came out light. A `--tier` pin replaces the scoring entirely. Two guards apply even to pinned turns: a crash retry escalates one tier, and a session whose context is past the small models' window always runs on Fable
 5. **Visibility**: Failed scheduled turns alert in-room with a `⚠️` warning
-6. **Limitations**: 
+6. **Limitations**:
    - Scheduled turns only fire if the **room already exists**
    - Test rooms (`test-*`) are skipped unless the bridge runs with `--only`
 
 ## Cron Format
 
 5-field format (minute hour day month weekday), using UTC:
+
 - `0 9 * * *` — daily at 09:00 UTC
 - `*/15 * * * *` — every 15 minutes
 - `0 */6 * * *` — every 6 hours
@@ -64,14 +70,16 @@ node bridge.mjs --remove-schedule jam
 ## Monitoring
 
 Scheduled turn execution is logged to `logs/bridge.log`:
-```
+
+```text
 07:39:29 #jam scheduled turn queued
 07:39:30 #jam route → medium (2) scheduled automation
 07:39:30 #jam turn 12ab34cd (resume) from scheduler scheduler
 ```
 
 Failed runs appear as:
-```
+
+```text
 07:45:15 #jam route → medium (2) scheduled automation
 07:45:15 #jam turn 56ef78gh (resume) from scheduler scheduler
 07:45:21 #jam done 56ef78gh ERROR

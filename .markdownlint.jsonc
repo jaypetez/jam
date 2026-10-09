@@ -1,0 +1,6 @@
+{
+  // Long lines are fine in prose and templates.
+  "MD013": false,
+  // PR templates start with a level-2 heading.
+  "MD041": false
+}
