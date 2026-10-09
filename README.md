@@ -1,11 +1,16 @@
+![jam: a shared Claude Code room. Ann, Dee and Sam join by link, ask Claude to fix a test, and Ann approves a risky push.](docs/hero.svg)
+
 # jam — shared Claude Code sessions
 
 [![CI](https://github.com/jaypetez/jam/actions/workflows/ci.yml/badge.svg)](https://github.com/jaypetez/jam/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node 22+](https://img.shields.io/badge/node-22%2B-3c873a.svg)](package.json)
 
-Several people, one Claude Code session, from any browser. Each **room** is a Claude Code session running in one
-directory on a machine you control (the **host**). People join with a short invite link, everyone sees the same
-streamed transcript, tool calls, uploads, and each other typing. Claude sees every message tagged with who said it.
+**Several people, one Claude Code session, from any browser.** Each **room** is a Claude Code session running in one directory on a machine
+you control (the **host**). People join with a short invite link, everyone sees the same streamed transcript, tool calls and uploads, and
+Claude sees every message tagged with who said it. Owners approve anything risky a driver asks for.
+
+[Quick start](#quick-start) · [What you get](#what-you-get) · [Setup](#setup-about-five-minutes) · [Security](#security) · [Protocol](docs/PROTOCOL.md) · [Contributing](CONTRIBUTING.md)
 
 ```text
  browser ──┐                                       ┌── claude -p --resume … (room A)
@@ -15,12 +20,25 @@ streamed transcript, tool calls, uploads, and each other typing. Claude sees eve
 
 Native Claude Code is single-user. jam sidesteps that using one Claude subscription on the host.
 
+## Quick start
+
+You need a Cloudflare account (free plan), Node 22+, and Claude Code logged in (`claude login`) or an `ANTHROPIC_API_KEY`.
+
+```bash
+git clone https://github.com/jaypetez/jam.git && cd jam
+./setup.sh      # generates the owner key, deploys the Worker, prints your lobby link
+./run.sh        # starts the bridge on this machine (leave it running)
+```
+
+Open the lobby link, create a room (a name and a directory on the host), open it, and hit **Invite** to send short links. The
+[full setup](#setup-about-five-minutes) covers deployment options, a custom domain and auto-start.
+
 ## What you get
 
 - **Rooms.** One session per directory. Create as many as you like from the lobby; the bridge picks them up live.
   Switch rooms from the sidebar.
 - **Auto-routing (default).** Each message is weighed and sent to the right model: chatter to Haiku, small changes to
-  Sonnet, real work to Fable. A session whose context outgrows the smaller windows is pinned to the 1M model
+  Sonnet, real work to Opus (Fable is never auto-routed; pin it by hand). A session whose context outgrows the smaller windows is pinned to the 1M model
   automatically — that part is correctness, not thrift. A crashed turn retries one weight heavier. The rules live in
   `route.mjs` with unit tests in `route.test.mjs`, and every decision is appended to `~/.jam/routing.jsonl` so the
   weights can be calibrated against real cost and duration. Pin a room to one model from the sidebar if you'd rather.
@@ -137,25 +155,39 @@ Rotate the owner key: `openssl rand -hex 24 > .jam-key && ./deploy.sh`, then res
 
 ## Tests
 
-`./check.sh` runs offline syntax checks (CI). `./run-tests.sh` runs the end-to-end suite against your deployed
-Worker: it creates `test-*` rooms (normal bridges ignore those), starts a dedicated bridge, exercises tokens, roles,
-presence, typing, approvals, queue cancel, history, export, uploads, revocation, and `/compact` (handoff written,
-fresh session, facts survive), then cleans up. With Playwright
-installed (`npm i`), it also runs `reconnect.test.mjs`: a browser that loses its socket mid-reply must still end up
-showing the full reply — the room hands a reconnecting tab the in-flight text, and the bridge holds events it
-couldn't deliver and replays them.
+`npm test` (`./check.sh`) is the offline gate CI runs, and needs no network or credentials: syntax checks, unit tests for the router, catalog,
+schedules, budgets and every bridge module, the approval-hook and driver-sandbox tests, `test-worker-hub.mjs` (the Worker's Hub REST API and
+auth, run against the built bundle with a fake Durable Object runtime) and `test-bridge-turn.mjs` (the real bridge against a fake hub and a stub
+`claude`: turns, retries, usage-cap fallback, uploads, `/compact`). Any single test is `node <file>`. See [AGENTS.md](AGENTS.md) for the full map and
+a one-line Docker command for Windows.
+
+`./run-tests.sh` is the end-to-end suite against your **deployed** Worker: it creates `test-*` rooms (normal bridges ignore those), starts a
+dedicated bridge, exercises tokens, roles, presence, typing, approvals, queue cancel, history, export, uploads, revocation, and `/compact`
+(handoff written, fresh session, facts survive), then cleans up. With Playwright installed (`npm i`), it also runs `reconnect.test.mjs`: a
+browser that loses its socket mid-reply must still end up showing the full reply — the room hands a reconnecting tab the in-flight text, and the
+bridge holds events it couldn't deliver and replays them.
 
 ## Files
 
-- `route.mjs` + `route.test.mjs` — the auto-router and its tests
-- `worker.src.js` — Worker + `Hub` DO (rooms, tokens, bridge/lobby sockets) + `Room` DO (transcript, sockets, approvals, queue)
-- `ui.html` — the whole UI, embedded into `worker.js` at build time by `build.sh`
-- `bridge.mjs` — host-side bridge, one Claude session per room; `approve-hook.mjs` — the approval gate
+- `bridge.mjs` — host-side bridge, one Claude session per room, wiring only; its logic lives in `turn-events.mjs`, `turn-policy.mjs`,
+  `models.mjs`, `session-store.mjs`, `compaction.mjs`, `room-dispatch.mjs`, `uploads.mjs` and `schedule-cli.mjs`, each with a `*.test.mjs`
+- `approve-hook.mjs` — the approval gate; `sandbox.mjs` and `sandbox/` — the macOS driver sandbox
+- `route.mjs` + `route.test.mjs` — the auto-router and its tests; `tune-router.mjs`, `catalog.mjs`, `schedule.mjs`, `budget.mjs`
+- `worker.src.js` — Worker + `Hub` DO (rooms, tokens, bridge/lobby sockets) + `Room` DO (transcript, sockets, approvals, queue);
+  `worker-lib.mjs` — its pure helpers and validation
+- `ui.html` — the whole UI, embedded into `worker.js` at build time by `build.sh` (which also inlines the modules in `inline-modules.txt`)
 - `setup.sh`, `deploy.sh`, `run.sh` / `run.cmd`, `check.sh`, `run-tests.sh`, `wrangler.toml`, `.env.example`, `io.nullagency.jam.plist`
 - `validate-worker-bundle.cjs` — pre-upload gate that `deploy.sh` runs on the built bundle (syntax, leaked secrets, DO bindings)
 
 Sessions persist in `~/.jam/sessions/<room>.json`; delete one to start that room fresh. Uploads in
 `~/.jam/uploads/<room>/`. Transcripts live in the Room DO.
+
+## Documentation
+
+- [docs/PROTOCOL.md](docs/PROTOCOL.md) — sockets, message types, roles and the REST API
+- [SCHEDULER.md](SCHEDULER.md) — scheduled turns
+- [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) — for AI coding agents working on jam
+- [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CHANGELOG.md](CHANGELOG.md)
 
 ## Contributing
 

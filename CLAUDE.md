@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+[AGENTS.md](AGENTS.md) is the operating contract for any coding agent here (how to verify a change, what is offline, hard rules, code map); this file adds the architecture and security invariants. The wire protocol is in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
 ## What this is
 
 jam runs shared, multi-user Claude Code sessions. Each **room** is one `claude -p --resume` session in one directory on a host machine. Browsers join via short invite links and share a live transcript. Roles are owner (unrestricted), driver (talks to Claude, risky tool calls need owner approval) and viewer. README.md covers features and setup; SCHEDULER.md covers scheduled turns.
