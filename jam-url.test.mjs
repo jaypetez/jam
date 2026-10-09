@@ -18,5 +18,18 @@ eq("an unknown JAM_SCHEME is ignored, not trusted", [isSecure("jam.example.com",
 eq("an empty JAM_SCHEME is ignored", isSecure("jam.example.com", { JAM_SCHEME: "" }), true);
 eq("reads process.env by default", (() => { const was = process.env.JAM_SCHEME; process.env.JAM_SCHEME = "http"; const r = httpBase("x.example"); if (was === undefined) delete process.env.JAM_SCHEME; else process.env.JAM_SCHEME = was; return r; })(), "http://x.example");
 
+// approve-hook.mjs inlines this rule instead of importing it (see the comment there). Run both over a table of hosts and schemes: they must agree.
+{ const { fileURLToPath } = await import("node:url"); const hook = fileURLToPath(new URL("./approve-hook.mjs", import.meta.url));
+  const src = (await import("node:fs")).readFileSync(hook, "utf8"); const m = /^const httpBase = host => .*$/m.exec(src); // one line in the hook
+  eq("approve-hook.mjs still carries its inlined httpBase", !!m, true);
+  if (m) {
+    const inlined = (host, env) => new Function("env", m[0] + "; return httpBase(" + JSON.stringify(host) + ");")(env);
+    const hosts = ["jam.nullagency.io", "jam.me.workers.dev", "127.0.0.1", "127.0.0.1:8787", "localhost:8787", "[::1]:8787", "::1", "128.0.0.1", "127.0.0.1.evil.com", "localhost.evil.com", "10.0.0.5:80", ""];
+    const envs = [{}, { JAM_SCHEME: "http" }, { JAM_SCHEME: "https" }, { JAM_SCHEME: "HTTP" }, { JAM_SCHEME: "ftp" }, { JAM_SCHEME: "" }];
+    let agree = true; for (const h of hosts) for (const e of envs) if (inlined(h, e) !== httpBase(h, e)) { agree = false; console.log(`MISMATCH host=${JSON.stringify(h)} env=${JSON.stringify(e)}: hook ${inlined(h, e)} vs jam-url ${httpBase(h, e)}`); }
+    eq(`the hook's inlined httpBase agrees with jam-url.mjs on ${hosts.length * envs.length} host/scheme combinations`, agree, true);
+  }
+}
+
 console.log(`jam-url: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
