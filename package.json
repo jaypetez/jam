@@ -10,7 +10,9 @@
     "build": "./build.sh",
     "deploy": "./deploy.sh",
     "start": "./run.sh",
-    "test": "./check.sh"
+    "dev": "node scripts/dev.mjs",
+    "test": "./check.sh",
+    "test:stack": "node test-stack.mjs"
   },
   "license": "MIT",
   "engines": {

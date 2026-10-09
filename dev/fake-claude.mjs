@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Stand-in for the `claude` CLI for test-bridge-turn.mjs only. Behaviour is chosen by a SCEN:<name> marker in the prompt it is fed on
+// Stand-in for the `claude` CLI (jam's fake claude): used by test-bridge-turn.mjs, test-stack.mjs, `npm run dev` and `npm run e2e`.
+// Behaviour is chosen by a SCEN:<name> marker in the prompt it is fed on
 // stdin, so one stub covers a normal turn, a crash, a usage cap, an env probe and a compaction handoff. Every call is appended to
 // <cwd>/.calls (model, mode, scenario) so the test can see what the bridge actually ran, in what order, on which model.
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
