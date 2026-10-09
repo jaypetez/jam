@@ -19,7 +19,7 @@ By participating in this project you agree to abide by the [Code of Conduct](COD
    ```
 
 2. Make your change. Keep each pull request focused on a single change; unrelated fixes belong in separate PRs.
-3. Run the offline checks CI runs (Node 18+ required):
+3. Run the offline checks CI runs (Node 22+ required: the bridge uses the global `WebSocket`):
 
    ```sh
    npm ci

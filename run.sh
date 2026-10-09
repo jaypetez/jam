@@ -17,7 +17,7 @@ if [ -f .env ]; then
   done < .env
 fi
 NODE=$(command -v node || ls /opt/homebrew/bin/node /usr/local/bin/node 2>/dev/null | head -1)
-[ -z "$NODE" ] && { echo "node not found; install Node 18+ (brew install node)"; exit 1; }
+[ -z "$NODE" ] && { echo "node not found; install Node 22+ (brew install node)"; exit 1; }
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 # bridge.mjs watches its own source and exits 0 to pick up new code once every room is idle; launchd's KeepAlive is
 # supposed to relaunch it (or any real crash) but was found 2026-09-29/30 sitting in "on-demand-only" mode for the
