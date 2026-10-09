@@ -28,7 +28,7 @@ ok(hook("Bash", sh("node build.js"), { JAM_FROM_ROLE: "scheduler", JAM_RUN_LOCAL
 ok(hook("Bash", sh("node build.js"), { JAM_FROM_ROLE: "driver", JAM_RUN_LOCAL: "true" }).status === 2, "only the exact value \"1\" counts");
 ok(hook("Bash", sh("node build.js"), { JAM_RUN_LOCAL: "1" }).status === 2, "no role at all: not trusted");
 // wiring: the bridge sets it only for driver turns of a room whose flag is strictly true, and never inherits it
-const bridge = fs.readFileSync(path.join(REPO, "bridge.mjs"), "utf8"), worker = fs.readFileSync(path.join(REPO, "worker.src.js"), "utf8");
+const bridge = fs.readFileSync(path.join(REPO, "bridge.mjs"), "utf8"), workerSrc = fs.readFileSync(path.join(REPO, "worker.src.js"), "utf8"), workerLib = fs.readFileSync(path.join(REPO, "worker-lib.mjs"), "utf8"), worker = workerSrc + "\n" + workerLib; // room-settings validation moved to worker-lib.mjs (2026-10-09)
 // behaviour of the predicate the bridge actually calls (not a grep over its source)
 const J = fs.realpathSync(REPO), S = path.join(fs.realpathSync(os.homedir()), ".jam"), H = fs.realpathSync(os.homedir());
 const v = cwd => runLocalVerdict({ runLocal: true, sandboxed: true, cwdReal: cwd, jamCode: J, jamState: S }).on;
@@ -46,6 +46,6 @@ ok(!/[^.]env\.JAM_RUN_LOCAL = "1"/.test(bridge) && /delete env\.JAM_RUN_LOCAL;/.
 ok([...bridge.matchAll(/type: "session"[^}]*\}/g)].every(m => /runLocal/.test(m[0])), "bridge: every session event carries runLocal (else the UI box desyncs on a model change)");
 ok(hook("Bash", { command: "node x", dangerouslyDisableSandbox: true }, DL).status === 2, "flag on: dangerouslyDisableSandbox is never card-free");
 ok(/r\.runLocal = b\.runLocal === true/.test(worker), "worker: stored as a strict boolean");
-ok(!/runLocal/.test((worker.match(/p === "\/rooms" && req\.method === "POST"[\s\S]*?return json\(\{ ok: true, room: r \}\)/) || [""])[0]), "worker: room creation can't pre-enable it");
+ok(!/runLocal/.test((workerSrc.match(/p === "\/rooms" && req\.method === "POST"[\s\S]*?return json\(\{ ok: true, room: r \}\)/) || [""])[0]) && !/runLocal/.test((workerLib.match(/export function parseNewRoom[\s\S]*?\n}\n/) || [""])[0]) && /export function parseNewRoom/.test(workerLib), "worker: room creation can't pre-enable it");
 fs.rmSync(room, { recursive: true, force: true });
 console.log(`\n${pass}/${pass + fail} passed.`); process.exit(fail ? 1 : 0);
