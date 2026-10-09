@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // jam approval hook (Claude Code PreToolUse). Owners run unimpeded. For everyone else, risky tool calls
 // are posted to the room and this hook waits for an owner to Allow or Deny. Exit 0 = allow, exit 2 = block.
+import { httpBase } from "./jam-url.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
@@ -364,7 +365,7 @@ if (isMain) (async () => {
   let hubKey = env.JAM_KEY || ""; if (!hubKey) { try { hubKey = fs.readFileSync(path.join(JAM_DIR, ".jam-key"), "utf8").trim(); } catch {} }
   if (!env.JAM_HOST || !hubKey || !env.JAM_ROOM) { console.error("jam: no room to ask for approval (JAM_HOST/JAM_KEY/JAM_ROOM unset); blocked"); process.exit(2); }
 
-  const base = `https://${env.JAM_HOST}/api/approve`; const q = `?k=${encodeURIComponent(hubKey)}&room=${encodeURIComponent(env.JAM_ROOM)}`;
+  const base = `${httpBase(env.JAM_HOST)}/api/approve`; const q = `?k=${encodeURIComponent(hubKey)}&room=${encodeURIComponent(env.JAM_ROOM)}`;
   let id;
   try {
     const r = await fetch(base + q, { method: "POST", body: JSON.stringify({ from: env.JAM_FROM || "?", tool, summary: c.summary.slice(0, 2000), detail: JSON.stringify(input).slice(0, 6000) }) });

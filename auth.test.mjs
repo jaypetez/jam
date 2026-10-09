@@ -8,14 +8,15 @@
 //   JAM_ONLY=test-auth JAM_CLAUDE=<repo>/test-auth-claude-stub.mjs JAM_AUTH_STATE=/tmp/jam-auth-state.json \
 //   JAM_AUTH_GOOD_CODE=good-code JAM_CATALOG=off node bridge.mjs
 //   K=<owner key> JAM_HOST=<host> ROOM=test-auth node auth.test.mjs
-const K = process.env.K, H = process.env.JAM_HOST || "jam.nullagency.io", ROOM = process.env.ROOM || "test-auth";
+import { httpBase, wsBase, DEFAULT_HOST } from "./jam-url.mjs";
+const K = process.env.K, H = process.env.JAM_HOST || DEFAULT_HOST, ROOM = process.env.ROOM || "test-auth";
 const GOOD = process.env.JAM_AUTH_GOOD_CODE || "good-code";
 let fail = 0; const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
-const sock = async (q) => { const w = new WebSocket(`wss://${H}/ws?${q}`); await new Promise((res, rej) => { w.onopen = () => res(); w.onerror = () => rej(new Error("ws error")); }); const evs = []; w.onmessage = ev => evs.push(JSON.parse(ev.data)); w.evs = evs; return w; };
+const sock = async (q) => { const w = new WebSocket(`${wsBase(H)}/ws?${q}`); await new Promise((res, rej) => { w.onopen = () => res(); w.onerror = () => rej(new Error("ws error")); }); const evs = []; w.onmessage = ev => evs.push(JSON.parse(ev.data)); w.evs = evs; return w; };
 const waitFor = (evs, pred, ms) => new Promise(res => { const t0 = Date.now(); const iv = setInterval(() => { const hit = evs.find(pred); if (hit || Date.now() - t0 > ms) { clearInterval(iv); res(hit || null); } }, 200); });
 
 // an invite for the driver half of the test
-const inv = await (await fetch(`https://${H}/api/rooms/${ROOM}/invites?k=${K}`, { method: "POST", body: JSON.stringify({ role: "driver", name: "Driver1" }) })).json();
+const inv = await (await fetch(`${httpBase(H)}/api/rooms/${ROOM}/invites?k=${K}`, { method: "POST", body: JSON.stringify({ role: "driver", name: "Driver1" }) })).json();
 const tok = inv.invite?.token || inv.token;
 
 const owner = await sock(`room=${ROOM}&k=${K}&name=Mike`);
@@ -69,7 +70,7 @@ const driver2 = await sock(`k=${tok}&name=Driver1`);
 const dhello = await waitFor(driver2.evs, e => e.type === "hello", 10000);
 ok(dhello && !dhello.auth, "a reloading driver gets no auth state in hello");
 // the code itself must never be stored in the shared transcript
-const hist = await (await fetch(`https://${H}/api/rooms/${ROOM}/history?k=${K}`)).json();
+const hist = await (await fetch(`${httpBase(H)}/api/rooms/${ROOM}/history?k=${K}`)).json();
 ok(!JSON.stringify(hist).includes(GOOD), "the code never lands in the stored transcript");
 
 for (const w of [owner, driver, owner2, driver2]) { try { w.close(); } catch {} }

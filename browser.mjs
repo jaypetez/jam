@@ -13,6 +13,7 @@
 // Cookies/localStorage persist per room across turns (profile dir below) so a login survives.
 // In-page JS state does not survive between separate invocations — chain multi-step flows
 // (fill several fields, submit) into one call's steps array rather than one call per field.
+import { wsBase } from "./jam-url.mjs";
 import { chromium } from "playwright";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
@@ -50,7 +51,7 @@ if (!key) fail("no JAM_KEY in env — this must run inside a jam turn (Bash tool
 function postCard({ summary, input, image, isError, text }) {
   return new Promise(resolve => {
     const callId = "browser-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
-    const ws = new WebSocket(`wss://${host}/ws?room=${encodeURIComponent(room)}&k=${encodeURIComponent(key)}&role=bridge&name=bridge`);
+    const ws = new WebSocket(`${wsBase(host)}/ws?room=${encodeURIComponent(room)}&k=${encodeURIComponent(key)}&role=bridge&name=bridge`);
     const done = () => { try { ws.close(); } catch {} resolve(); };
     const timer = setTimeout(done, 8000); // never hang a Claude turn on a flaky socket
     ws.onopen = () => {
@@ -70,7 +71,7 @@ const describe = s => s.action === "goto" ? "goto " + cleanUrl(s.url) : s.action
 async function startLive(context, page) {
   if (silent || !host) return null;
   const sid = String(turnId).slice(0, 24) + "-" + Date.now().toString(36);
-  const ws = new WebSocket(`wss://${host}/ws?room=${encodeURIComponent(room)}&k=${encodeURIComponent(key)}&role=screen`);
+  const ws = new WebSocket(`${wsBase(host)}/ws?room=${encodeURIComponent(room)}&k=${encodeURIComponent(key)}&role=screen`);
   const opened = await new Promise(res => { const t = setTimeout(() => res(false), 3000); ws.onopen = () => { clearTimeout(t); res(true); }; ws.onerror = () => { clearTimeout(t); res(false); }; });
   if (!opened) { try { ws.close(); } catch {} return null; }
   const L = { label: "", url: "", latest: null, last: 0, timer: null, cdp: null };

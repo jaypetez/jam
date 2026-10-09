@@ -2,9 +2,10 @@
 // Regression: a browser that loses its socket in the middle of a streaming reply must still show the reply.
 // Needs: a deployed Worker, a bridge serving the test room (run-tests.sh does this), Playwright.
 //   K=<owner key> JAM_HOST=<host> node reconnect.test.mjs
+import { httpBase, DEFAULT_HOST } from "./jam-url.mjs";
 import { chromium } from "playwright";
 
-const K = process.env.K, H = process.env.JAM_HOST || "jam.nullagency.io", ROOM = process.env.ROOM || "test-reconnect";
+const K = process.env.K, H = process.env.JAM_HOST || DEFAULT_HOST, ROOM = process.env.ROOM || "test-reconnect";
 let fail = 0; const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 
 const b = await chromium.launch({ args: ["--mute-audio"] });
@@ -14,7 +15,7 @@ await ctx.addInitScript(() => { // expose the room socket so the test can kill i
   const W = window.WebSocket; window.WebSocket = class extends W { constructor(...a) { super(...a); window.__socks.push(this); this.addEventListener("message", e => { try { if (this.url.includes("/ws?") && JSON.parse(e.data).type === "hello") window.__hellos++; } catch {} }); } };
 });
 const p = await ctx.newPage();
-await p.goto(`https://${H}/r/${ROOM}?k=${K}`);
+await p.goto(`${httpBase(H)}/r/${ROOM}?k=${K}`);
 // Wait for the room socket's first hello, not a fixed delay: send() is a no-op while
 // ws.readyState!==1, so under full-suite load a 2500ms guess dropped the message and no
 // turn ever reached the bridge (flaked 3x on 2026-09-11, passed in isolation every time).
@@ -28,7 +29,7 @@ const started = await p.waitForSelector(".msg.ai .body.cursor", { timeout: 60000
 ok(started, "reply started streaming");
 
 // drop the socket mid-stream from the server side — the same thing a recycled Durable Object (e.g. a deploy) does to every tab
-const dropped = await fetch(`https://${H}/api/rooms/${ROOM}/drop?k=${K}`, { method: "POST" }).then(r => r.json()).catch(() => ({}));
+const dropped = await fetch(`${httpBase(H)}/api/rooms/${ROOM}/drop?k=${K}`, { method: "POST" }).then(r => r.json()).catch(() => ({}));
 ok(dropped.ok, `server dropped ${dropped.closed} browser socket(s) mid-stream`);
 const reconnected = await p.waitForFunction(() => window.__hellos >= 2, null, { timeout: 20000 }).then(() => true).catch(() => false);
 ok(reconnected, "socket dropped and the page reconnected (second hello received)");

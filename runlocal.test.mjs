@@ -2,10 +2,11 @@
 // e2e: the "Run commands on this machine" switch, through the REAL bridge -> env -> approve hook path (stub CLI, run-tests.sh).
 //   JAM_ONLY=test-runlocal JAM_CLAUDE=<repo>/test-runlocal-claude-stub.mjs JAM_CATALOG=off node bridge.mjs
 //   K=<owner key> JAM_HOST=<host> ROOM=test-runlocal node runlocal.test.mjs
-const K = process.env.K, H = process.env.JAM_HOST || "jam.nullagency.io", ROOM = process.env.ROOM || "test-runlocal";
+import { httpBase, wsBase, DEFAULT_HOST } from "./jam-url.mjs";
+const K = process.env.K, H = process.env.JAM_HOST || DEFAULT_HOST, ROOM = process.env.ROOM || "test-runlocal";
 let fail = 0; const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
-const api = (p, body, method = "POST") => fetch(`https://${H}/api${p}${p.includes("?") ? "&" : "?"}k=${K}`, { method, body: body ? JSON.stringify(body) : undefined }).then(r => r.json());
-const sock = async q => { const w = new WebSocket(`wss://${H}/ws?${q}`); await new Promise((res, rej) => { w.onopen = () => res(); w.onerror = () => rej(new Error("ws error")); }); const evs = []; w.onmessage = e => evs.push(JSON.parse(e.data)); return { w, evs, send: x => w.send(x) }; };
+const api = (p, body, method = "POST") => fetch(`${httpBase(H)}/api${p}${p.includes("?") ? "&" : "?"}k=${K}`, { method, body: body ? JSON.stringify(body) : undefined }).then(r => r.json());
+const sock = async q => { const w = new WebSocket(`${wsBase(H)}/ws?${q}`); await new Promise((res, rej) => { w.onopen = () => res(); w.onerror = () => rej(new Error("ws error")); }); const evs = []; w.onmessage = e => evs.push(JSON.parse(e.data)); return { w, evs, send: x => w.send(x) }; };
 const waitFor = (evs, pred, ms) => new Promise(res => { const t0 = Date.now(); const iv = setInterval(() => { const hit = evs.find(pred); if (hit || Date.now() - t0 > ms) { clearInterval(iv); res(hit || null); } }, 250); });
 const inv = await api(`/rooms/${ROOM}/invites`, { role: "driver", name: "Driver1" });
 const tok = inv.invite?.token || inv.token;

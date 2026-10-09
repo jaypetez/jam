@@ -1,7 +1,8 @@
 // Status bar regression test: verify no raw tool calls leak into final message or UI.
 // Usage: K=$(cat .jam-key) node test-status-bar.mjs  (see run-tests.sh)
 // Runs a turn, captures room history, checks that visible items don't contain raw commands.
-const host=process.env.JAM_HOST||"jam.nullagency.io", K=process.env.K, room=process.env.ROOM||"test-status-bar", base=`https://${host}`;
+import { httpBase, wsBase, DEFAULT_HOST } from "./jam-url.mjs";
+const host=process.env.JAM_HOST||DEFAULT_HOST, K=process.env.K, room=process.env.ROOM||"test-status-bar", base=httpBase(host);
 const j=(u,o)=>fetch(base+u,o).then(r=>r.json());
 const wait=(ws,pred,ms=120000)=>new Promise((res,rej)=>{const t=setTimeout(()=>rej(new Error("timeout: "+pred)),ms);const h=ev=>{const e=JSON.parse(ev.data);if(pred(e)){clearTimeout(t);ws.removeEventListener("message",h);res(e)}};ws.addEventListener("message",h)});
 const ok=(name,cond,extra="")=>{console.log(cond?"PASS":"FAIL",name,extra)};
@@ -16,7 +17,7 @@ const rawPatterns=[
 const containsRaw=text=>{if(!text)return false;const lines=text.split('\n');return lines.some(line=>rawPatterns.some(pat=>pat.test(line)))};
 
 // Run the test
-const ws=new WebSocket(`wss://${host}/ws?room=${room}&k=${K}&name=Mike`);
+const ws=new WebSocket(`${wsBase(host)}/ws?room=${room}&k=${K}&name=Mike`);
 await new Promise(r=>ws.onopen=r);
 const hello=await wait(ws,e=>e.type==="hello");
 ok("connected to test-status-bar room",hello.you.role==="owner");
