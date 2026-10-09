@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// qa/validate-worker-bundle.js — pre-upload gate for Cloudflare Worker bundles.
+// validate-worker-bundle.cjs — pre-upload gate for Cloudflare Worker bundles.
 //
 // Every deploy script in the stack reads a single-file ES module worker and
 // PUTs it straight to api.cloudflare.com. Until this file existed, nothing
@@ -9,12 +9,12 @@
 // production was already broken. This gate refuses the upload instead.
 //
 // Library use (CommonJS or ESM — named exports are detected by Node):
-//   const { assertWorkerBundle } = require('../qa/validate-worker-bundle');
+//   const { assertWorkerBundle } = require('./validate-worker-bundle.cjs');
 //   assertWorkerBundle({ code, fileName: 'worker.js', metadata, label: SCRIPT_NAME });
 //   // prints a report; exits 1 and never returns if the bundle is invalid
 //
 // CLI use (shell deploys):
-//   node qa/validate-worker-bundle.js [--metadata metadata.json] [--cron EXPR]...
+//   node validate-worker-bundle.cjs [--metadata metadata.json] [--cron EXPR]...
 //                                      [--expect-secret NAME]... [--label NAME] [--json] path/to/worker.js
 //   exit 0 = valid, exit 1 = invalid, exit 2 = usage error
 //
