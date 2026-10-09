@@ -1,0 +1,71 @@
+name: Deploy Worker
+
+# Every push to main runs the offline checks. The Cloudflare deploy only runs after a
+# reviewer approves the `production` environment, so a push alone never changes the live hub.
+# No workflow_dispatch: a dispatch could run a modified copy of this file from any branch.
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: jam-deploy
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+      - run: npm ci --ignore-scripts
+      - name: Throwaway .jam-key for the sandbox tests
+        # The sandbox tests need a .jam-key on disk to prove it stays unreadable. Use a random
+        # throwaway value that never leaves this runner; it is not the hub key.
+        run: openssl rand -hex 24 > .jam-key
+      - run: ./check.sh
+
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+      - name: Refuse to deploy without the owner key
+        # deploy.sh generates a fresh .jam-key when none exists and pushes it as the JAM_KEY
+        # binding. Running without the real key would rotate the owner key and lock the owner out.
+        env:
+          JAM_KEY: ${{ secrets.JAM_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          JAM_HOST: ${{ vars.JAM_HOST }}
+        run: |
+          if [ -z "$JAM_KEY" ] || [ -z "$CF_ACCOUNT_ID" ] || [ -z "$CF_API_TOKEN" ] || [ -z "$JAM_HOST" ]; then
+            echo "missing a deploy secret or variable (JAM_KEY, CF_ACCOUNT_ID, CF_API_TOKEN, JAM_HOST)" >&2
+            exit 1
+          fi
+          printf '%s' "$JAM_KEY" > .jam-key
+          chmod 600 .jam-key
+      - name: Deploy and verify build hash
+        # Do not upload or cache this workspace: .jam-key sits in it.
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          JAM_HOST: ${{ vars.JAM_HOST }}
+          JAM_FORCE_API: '1'
+        run: ./deploy.sh

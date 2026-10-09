@@ -24,6 +24,9 @@ jobs:
         with:
           node-version: '18'
       - run: npm ci
+      - name: Throwaway .jam-key for the sandbox tests
+        # Random value that never leaves this runner; it is not the hub key.
+        run: openssl rand -hex 24 > .jam-key
       - run: ./check.sh
 
   lint:
