@@ -157,15 +157,15 @@ const linkInvalid = await driver.p.waitForSelector("text=Link not valid", { time
 ok(linkInvalid, "re-visiting the revoked /j/ link shows \"Link not valid\" — cannot rejoin with the old token");
 
 // and prove the raw socket path is dead too: try to open a new /ws with the revoked token directly.
-const wsRejected = await driver.p.evaluate(async ({ host, tok, room }) => {
+const wsRejected = await driver.p.evaluate(async ({ base, tok, room }) => { // runs in the BROWSER: it cannot see wsBase(), so the ws:// / wss:// base is computed here and passed in
   return await new Promise(resolve => {
-    const ws = new WebSocket(`${wsBase(host)}/ws?k=${encodeURIComponent(tok)}&room=${encodeURIComponent(room)}&name=Driver1Retry`);
+    const ws = new WebSocket(`${base}/ws?k=${encodeURIComponent(tok)}&room=${encodeURIComponent(room)}&name=Driver1Retry`);
     const timer = setTimeout(() => resolve("timeout"), 6000);
     ws.onopen = () => { clearTimeout(timer); resolve("opened"); };
     ws.onerror = () => { clearTimeout(timer); resolve("error"); };
     ws.onclose = ev => { clearTimeout(timer); resolve("closed:" + ev.code); };
   });
-}, { host: H, tok: driverTok, room: ROOM });
+}, { base: wsBase(H), tok: driverTok, room: ROOM });
 ok(wsRejected !== "opened", `a raw /ws connect attempt with the revoked token does not open a working socket (got: ${wsRejected}) — worker.src.js: auth() -> /resolve 404 -> "/ws" returns 403`);
 
 await b.close();

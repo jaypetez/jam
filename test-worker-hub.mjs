@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Offline test of the Worker's Hub REST surface and auth routing (2026-10-09). It imports the BUILT bundle (worker.js), so it also proves
 // that build.sh's inlining of budget.mjs and worker-lib.mjs produced a working Worker. Cloudflare's Durable Object runtime is faked with a
-// Map-backed storage and in-process stubs; the websocket paths (/ws, /hub upgrade) and the Room DO are NOT covered here: they need workerd,
-// so they stay with run-tests.sh against the live Worker.
+// Map-backed storage and in-process stubs, which is fast and needs no wrangler; the websocket paths (/ws, /hub upgrade) and the Room DO are NOT
+// covered here: test-stack.mjs and `npm run e2e` cover them on the real runtime (workerd).
 import fs from "node:fs";
 if (!fs.existsSync(new URL("./worker.js", import.meta.url))) { console.error("worker.js missing: run ./build.sh first"); process.exit(1); }
 const mod = await import("./worker.js"); const worker = mod.default;

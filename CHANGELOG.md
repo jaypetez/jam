@@ -6,6 +6,25 @@ Worker only changes when its owner runs `./deploy.sh`.
 
 ## [Unreleased]
 
+### Added
+
+- **A self-contained dev loop.** `npm run dev` starts the real Worker on workerd (real Durable Objects), a real bridge and a deterministic fake `claude`
+  in a throwaway directory and prints owner, driver and viewer links. `npm run e2e` runs the live end-to-end suite (previously production-only) against
+  it, including the Playwright tests; `npm run test:stack` checks the Room and Hub Durable Objects over real websockets; `npm run verify` runs the lot.
+  CI gains an `e2e` job. See `docs/DEV.md`.
+- `jam-url.mjs` / `JAM_SCHEME`: clients speak http/ws to a loopback host and https/wss to everything else, instead of hard-coding TLS.
+- `dev/fake-claude.mjs` and its rules table: writes Claude Code's session transcript, calls the real approval hook, simulates a few harmless shell
+  builtins and never runs arbitrary commands.
+
+### Changed
+
+- `bridge.mjs`: `JAM_CLAUDE` may name a `.js/.mjs/.cjs` script, run with the bridge's own node (no shebang, exec bit or Windows shim needed).
+- `deploy.yml` uses Node 22 (the bridge needs the global `WebSocket`).
+
+### Fixed
+
+- `test-boot.mjs` built a websocket URL inside a browser callback where its helper does not exist; found by the first local run of the suite.
+
 ## [0.3.0] - 2026-10-09
 
 ### Added

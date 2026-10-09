@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '22'
       - run: npm ci --ignore-scripts
       - name: Throwaway .jam-key for the sandbox tests
         # The sandbox tests need a .jam-key on disk to prove it stays unreadable. Use a random
@@ -45,7 +45,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Refuse to deploy without the owner key
         # deploy.sh generates a fresh .jam-key when none exists and pushes it as the JAM_KEY
         # binding. Running without the real key would rotate the owner key and lock the owner out.
