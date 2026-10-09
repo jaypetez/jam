@@ -1,0 +1,5 @@
+# Modules inlined into worker.js ahead of worker.src.js, in this order (build.sh and deploy.sh both read this file, so the build hash and the
+# bundle can never disagree about what is in it). Each must be import-free, start every top-level declaration with `export ` (stripped at
+# build time), and avoid names that collide with worker.src.js. budget.mjs is shared with the bridge; worker-lib.mjs is Worker-only.
+budget.mjs
+worker-lib.mjs

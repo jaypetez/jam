@@ -18,8 +18,9 @@ RC=0; "$NODE_BIN" validate-worker-bundle.cjs --metadata "$METAF" --label "${JAM_
 rm -f "$METAF"
 [ "$RC" -eq 0 ] || { echo "BUNDLE GATE FAILED — refusing to deploy." >&2; exit 1; }
 if [ "${1:-}" = "--check" ]; then echo "--check: bundle gate passed. Not deploying."; exit 0; fi
-# compute expected build hash (sha of ui.html + worker.src.js + budget.mjs, same as build.sh)
-EXPECTED_HASH=$(cat ui.html worker.src.js budget.mjs | shasum -a 256 | cut -c1-10)
+# expected build hash: read back from the bundle build.sh just wrote, so it can never disagree with build.sh's own list of inlined modules
+EXPECTED_HASH=$(grep -o 'const BUILD="[0-9a-f]*"' worker.js | head -1 | cut -d'"' -f2)
+[ -n "$EXPECTED_HASH" ] || { echo "deploy: could not read the build hash out of worker.js" >&2; exit 1; }
 if command -v wrangler >/dev/null 2>&1 && [ -z "$JAM_FORCE_API" ]; then
   wrangler deploy
   printf '%s' "$JK" | wrangler secret put JAM_KEY

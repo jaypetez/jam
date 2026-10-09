@@ -1,37 +1,12 @@
 // jam — shared Claude Code session rooms. Cloudflare Worker + two Durable Objects.
 //   Hub  (singleton): room registry, invite tokens, bridge sockets, owner lobby sockets.
 //   Room (per room):  transcript, user/bridge sockets, typing, approvals.
-// The UI is base64-embedded at build time as B64 (see build.sh).
+// The UI is base64-embedded at build time as B64 (see build.sh). The modules in inline-modules.txt (budget.mjs, worker-lib.mjs) are inlined
+// ahead of this file with their `export` stripped, so ROLES, TIERS, roomName, token, cleanCatalog, parseNewRoom... below come from there.
 
 const MAX_LOG = 5000;
-const ROLES = new Set(["owner", "driver", "viewer"]);
-const TIERS = new Set(["light", "medium", "heavy"]); // room-level ROUTING weight override for the auto-router (which model runs); "auto" (unset) lets it score each message itself. NOT Anthropic effort — see EFFORT_LEVELS.
-const EFFORT_LEVELS = new Set(["auto", "low", "medium", "high", "xhigh", "max"]); // Anthropic's real --effort levels (how hard the chosen model thinks); "auto" omits the flag
-const TOKEN_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789"; // no 0/o/1/l, link-friendly
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 const bad = (msg, status = 400) => json({ ok: false, error: msg }, status);
-// a catalog comes from a bridge socket (any owner key can open one): keep only well-formed fields, so a bad payload
-// can't be stored and break every room page on load
-const LEVELS = ["low", "medium", "high", "xhigh", "max"];
-function cleanCatalog(m) {
-  if (!m || !Array.isArray(m.models)) return null;
-  const str = (v, n) => typeof v === "string" && v.length && v.length <= n ? v : null, num = v => Number.isFinite(v) && v >= 0 ? v : null;
-  const models = m.models.slice(0, 60).filter(x => x && str(x.id, 80)).map(x => ({ id: x.id, label: str(x.label, 80) || x.id, family: str(x.family, 40), window: num(x.window), maxOut: num(x.maxOut),
-    effort: Array.isArray(x.effort) ? LEVELS.filter(l => x.effort.includes(l)) : null, current: !!x.current,
-    price: x.price && num(x.price.in) !== null && num(x.price.out) !== null ? { in: x.price.in, out: x.price.out, cacheRead: num(x.price.cacheRead) } : null }));
-  const tiers = {}; for (const t of ["light", "medium", "heavy"]) if (m.tiers && str(m.tiers[t], 80)) tiers[t] = m.tiers[t];
-  return models.length ? { models, tiers, ts: num(m.ts) || Date.now() } : null;
-}
-function cleanPlan(m) {
-  if (!m || !Array.isArray(m.limits)) return null;
-  const limits = m.limits.slice(0, 12).filter(l => l && typeof l.kind === "string").map(l => ({ kind: l.kind.slice(0, 40), group: typeof l.group === "string" ? l.group.slice(0, 40) : null, percent: Math.max(0, Math.min(100, Number(l.percent) || 0)), resetsAt: Number.isFinite(l.resetsAt) ? l.resetsAt : null, scope: typeof l.scope === "string" ? l.scope.slice(0, 60) : null }));
-  const num = v => Number.isFinite(v) && v > 0 && v < 50 ? v : null;
-  return limits.length ? { limits, rate: { session: num(m.rate?.session), weekly: num(m.rate?.weekly) }, calibrated: !!(num(m.rate?.session) || num(m.rate?.weekly)), ts: Number.isFinite(m.ts) ? m.ts : Date.now() } : null;
-}
-const roomName = s => String(s || "").replace(/[^a-z0-9_-]/gi, "").toLowerCase().slice(0, 40);
-const isAbsCwd = s => /^\//.test(s) || /^[A-Za-z]:[\\/]/.test(s); // POSIX (/…) or Windows (C:\… or C:/…) absolute path
-function token(n = 12) { const b = crypto.getRandomValues(new Uint8Array(n)); let s = ""; for (const x of b) s += TOKEN_ALPHABET[x % 32]; return s; }
-function safeEq(a, b) { if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false; let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i); return r === 0; }
 
 /* ───────────────────────────── Hub ───────────────────────────── */
 export class Hub {
@@ -111,16 +86,8 @@ export class Hub {
     }
     if (p === "/rooms" && req.method === "POST") {
       const b = await req.json().catch(() => ({}));
-      const name = roomName(b.name); if (!name) return bad("room name: a-z 0-9 - _");
-      if (this.rooms[name]) return bad("#" + name + " already exists — room names are unique (case-insensitive)", 409);
-      const cwd = String(b.cwd || "").slice(0, 300);
-      if (!cwd) return bad("cwd required");
-      // A relative cwd resolves against the BRIDGE PROCESS's own directory, not the intended project — e.g. a room
-      // named/bio'd "Titan Index working session" with that same string typed into cwd silently created a stray
-      // directory inside jam's own source tree instead of erroring (found 2026-09-29, two rooms live with this bug).
-      if (!isAbsCwd(cwd)) return bad("cwd must be an absolute path (e.g. /Users/you/project or C:\\Users\\you\\project), not a description or a relative path");
-      const r = { name, cwd, model: String(b.model || "auto").slice(0, 60) || "auto", tier: TIERS.has(b.tier) ? b.tier : "auto", effort: EFFORT_LEVELS.has(b.effort) ? b.effort : "auto", created: Date.now(), updated: Date.now() };
-      if (/haiku/i.test(r.model)) r.effort = "auto"; // Haiku 4.5 doesn't take an effort parameter
+      const parsed = parseNewRoom(b, n => !!this.rooms[n]); if (parsed.error) return bad(parsed.error, parsed.status);
+      const name = parsed.room.name, r = { ...parsed.room, created: Date.now(), updated: Date.now() };
       this.rooms[name] = r; await this.save();
       this.broadcast({ type: "room.change", op: "add", room: r });
       return json({ ok: true, room: r });
@@ -128,9 +95,7 @@ export class Hub {
     if (p === "/rooms/order" && req.method === "POST") { // sidebar order, hub-global; unknown names dropped, unlisted rooms keep their relative order at the tail
       const b = await req.json().catch(() => ({}));
       if (!Array.isArray(b.order)) return bad("order: array of room names");
-      const seen = new Set(); const order = [];
-      for (const n of b.order.map(x => roomName(x))) if (n && Object.hasOwn(this.rooms, n) && !seen.has(n)) { seen.add(n); order.push(n); }
-      for (const n of [...(this.roomOrder || []), ...Object.keys(this.rooms)]) if (Object.hasOwn(this.rooms, n) && !seen.has(n)) { seen.add(n); order.push(n); }
+      const order = orderRooms(b.order, this.roomOrder, this.rooms);
       this.roomOrder = order; await this.save();
       this.broadcast({ type: "room.change", op: "order", order });
       return json({ ok: true, order });
@@ -138,12 +103,7 @@ export class Hub {
     if ((m = /^\/rooms\/([^/]+)\/settings$/.exec(p)) && req.method === "POST") { // model / cwd of an existing room
       const name = roomName(m[1]); const r = this.rooms[name]; if (!r) return bad("no such room", 404);
       const b = await req.json().catch(() => ({}));
-      if ("model" in b) r.model = String(b.model || "auto").slice(0, 60) || "auto";
-      if ("tier" in b) r.tier = TIERS.has(b.tier) ? b.tier : "auto";
-      if ("effort" in b) r.effort = EFFORT_LEVELS.has(b.effort) ? b.effort : "auto";
-      if ("runLocal" in b) r.runLocal = b.runLocal === true; // owner opt-in: drivers' shell commands in this room run without an Allow card (still inside the Seatbelt sandbox)
-      if (/haiku/i.test(r.model)) r.effort = "auto"; // pinning Haiku 4.5 (or Auto landing there) can't carry an effort level — keep stored state honest about what actually runs
-      if (b.cwd) { const cwd = String(b.cwd).slice(0, 300); if (!isAbsCwd(cwd)) return bad("cwd must be an absolute path (e.g. /Users/you/project or C:\\Users\\you\\project), not a description or a relative path"); r.cwd = cwd; }
+      const err = applyRoomSettings(r, b); if (err) return bad(err);
       r.updated = Date.now(); await this.save();
       this.broadcast({ type: "room.change", op: "update", room: r });
       return json({ ok: true, room: r });
@@ -344,6 +304,7 @@ export class Room {
   users() { return this.state.getWebSockets("user"); }
   send(ws, obj) { try { ws.send(JSON.stringify(obj)); } catch {} }
   broadcast(obj, tag) { const s = JSON.stringify(obj); for (const ws of (tag ? this.state.getWebSockets(tag) : this.state.getWebSockets())) { try { ws.send(s); } catch {} } }
+  toOwners(s) { for (const u of this.users()) if ((u.deserializeAttachment() || {}).role2 === "owner") { try { u.send(s); } catch {} } } // `s` is an already-serialized frame: host-account details and drivers' budget notes go to owners only
   presence(excludeWs) {
     const allUsers = this.users().filter(w => w !== excludeWs).map(w => { const a = w.deserializeAttachment() || {}; return { name: a.name, role: a.role2, token: a.token || "" }; });
     const bridgeOnline = this.bridges().length > 0;
@@ -548,7 +509,7 @@ export class Room {
               if (!(Date.now() - (this.noted[who.token] || 0) < 60000)) {
                 this.noted[who.token] = Date.now();
                 const note = JSON.stringify({ type: "sys", text: `${who.name}'s message didn't run: their budget is ${st.state === "paused" ? "paused" : "used up"}. Change it from their invite in the sidebar.`, ts: Date.now() });
-                for (const u of this.users()) if ((u.deserializeAttachment() || {}).role2 === "owner") { try { u.send(note); } catch {} }
+                this.toOwners(note);
               }
             }
             return;
@@ -623,7 +584,7 @@ export class Room {
       else if (m.type === "uploaded" || m.type === "upload_error" || m.type === "route" || m.type === "compacted") { if (m.type === "compacted") { const max = +m.ctxMax || this.ctx?.max || 0; this.ctx = max ? { now: +m.ctx || 0, max } : null; await this.saveMeta(); } this.broadcast(m, "user"); }
       else if (m.type === "catalog") { const c = cleanCatalog(m); if (c && c.ts !== this.catalog?.ts) { this.catalog = c; await this.saveMeta(); this.broadcast({ type: "catalog", ...c }, "user"); } }
       else if (m.type === "colors") { this.colors = { ...this.colors, ...(m.colors || {}) }; await this.saveMeta(); this.broadcast({ type: "colors", colors: this.colors }, "user"); }
-      else if (m.type === "sys" && m.owners) { const s = JSON.stringify({ type: "sys", text: String(m.text || "").slice(0, 300), ts: Date.now() }); for (const u of this.users()) if ((u.deserializeAttachment() || {}).role2 === "owner") { try { u.send(s); } catch {} } } // host-account details (plan quota): owners only, not stored in the shared log
+      else if (m.type === "sys" && m.owners) { const s = JSON.stringify({ type: "sys", text: String(m.text || "").slice(0, 300), ts: Date.now() }); this.toOwners(s); } // host-account details (plan quota): owners only, not stored in the shared log
       else if (m.type === "sys") { const e = { type: "sys", text: String(m.text || "").slice(0, 300), ts: Date.now() }; await this.push(e); this.broadcast(e, "user"); }
       else if (m.type === "agents") { this.agents = Array.isArray(m.list) ? m.list.slice(0, 40) : []; await this.saveMeta(); this.broadcast({ type: "agents", list: this.agents }, "user"); }
       else if (m.type === "schedules") { this.schedules = Array.isArray(m.list) ? m.list : []; await this.saveMeta(); this.broadcast({ type: "schedules", list: this.schedules }, "user"); }
@@ -631,9 +592,9 @@ export class Room {
         this.auth = { state: String(m.state || "").slice(0, 16), email: String(m.email || "").slice(0, 80), plan: String(m.plan || "").slice(0, 24), url: String(m.url || "").slice(0, 700), why: String(m.why || "").slice(0, 160), tail: String(m.tail || "").slice(0, 200), ts: m.ts || Date.now() };
         await this.saveMeta();
         const s = JSON.stringify({ type: "auth", ...this.auth });
-        for (const u of this.users()) if ((u.deserializeAttachment() || {}).role2 === "owner") { try { u.send(s); } catch {} }
+        this.toOwners(s);
       }
-      else if (m.type === "usage") { if (m.ts && m.ts === this.usage?.ts) return; this.usage = { limits: Array.isArray(m.limits) ? m.limits.slice(0, 12) : [], ts: m.ts || Date.now() }; await this.saveMeta(); const s = JSON.stringify({ type: "usage", ...this.usage }); for (const u of this.users()) if ((u.deserializeAttachment() || {}).role2 === "owner") { try { u.send(s); } catch {} } } // the host account's quota: owners only
+      else if (m.type === "usage") { if (m.ts && m.ts === this.usage?.ts) return; this.usage = { limits: Array.isArray(m.limits) ? m.limits.slice(0, 12) : [], ts: m.ts || Date.now() }; await this.saveMeta(); const s = JSON.stringify({ type: "usage", ...this.usage }); this.toOwners(s); } // the host account's quota: owners only
       else if (m.type === "sync") { if (!m.running) this.partial = null; this.status = { running: !!m.running, queue: Math.max(0, m.queue | 0), current: m.current || null }; await this.saveMeta(); this.broadcast({ type: "status", ...this.status }, "user"); }
       else if (m.type === "ping") { this.send(ws, { type: "pong" }); }
     }
