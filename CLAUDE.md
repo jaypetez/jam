@@ -16,9 +16,11 @@ node test-sandbox.mjs      # approval-hook / driver-sandbox gates (also test-san
 ./run-tests.sh             # end-to-end suite against the LIVE deployed Worker (needs .jam-key, JAM_HOST; Playwright via `npm i`)
 ./run.sh                   # start the host bridge (supervises bridge.mjs, restarts it on exit)
 ./deploy.sh                # build + bundle gate + deploy to Cloudflare + verify build hash; `./deploy.sh --check` = gate only
+npx markdownlint-cli2 "**/*.md" "#node_modules"   # Markdown lint (config: .markdownlint.jsonc)
+actionlint                 # workflow lint; or: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color
 ```
 
-- CI (`.github/workflows/ci.yml`) is just `npm ci && ./check.sh` on Node 18.
+- CI (`.github/workflows/ci.yml`) has two jobs, both required on `main`: `check` (`npm ci && ./check.sh` on Node 18) and `lint` (markdownlint-cli2 over all Markdown, plus actionlint).
 - `check.sh` assumes macOS/Linux. Under Windows Git Bash, the exec-bit guard false-fails on any shebang file stored as `100644` (e.g. `auth.test.mjs`), and several hook/sandbox tests fail on Windows paths. Use WSL, or run the pure unit tests individually.
 - Unit tests are plain Node scripts with no test framework; each prints a pass/fail summary and exits non-zero on failure.
 - `run-tests.sh` creates and deletes `test-*` rooms on the real Worker; normal bridges ignore `test-*` rooms. If you are running *inside* a jam room, the inherited `JAM_*` env points test bridges at the live room. Strip it first, as `nightly.sh` does: `env -u JAM_HOST -u JAM_KEY -u JAM_ROOM -u JAM_FROM -u JAM_FROM_ROLE -u JAM_TURN -u JAM_CWD ./run-tests.sh`.
@@ -59,3 +61,10 @@ The bridge runs Claude with permissions skipped, so these are what stand between
 ## Style
 
 Code is dense, with long lines and few blank lines. Comments explain *why*, often citing the dated incident that motivated a guard (e.g. "2026-09-28 outage"). Match that, and keep the existing regression comments when editing nearby code.
+
+- `.editorconfig` sets UTF-8, 2-space indent and a final newline. `.gitattributes` forces LF everywhere except `*.cmd`/`*.bat` (CRLF, e.g. `run.cmd`).
+- Workflow actions are pinned to a full commit SHA (or image digest) with the version in a trailing comment, e.g. `uses: actions/checkout@<sha> # v7.0.1`. Dependabot bumps actions and npm weekly in grouped PRs. Workflows use `permissions: contents: read` and `persist-credentials: false`.
+
+## Pull requests
+
+See CONTRIBUTING.md. In short: branch from `main`, one focused change per PR, and fill in the PR template. PRs are squash-merged, so the PR title becomes the commit message. Merging needs an approving review from `@jaypetez` (CODEOWNERS), and pushing after approval dismisses it.
