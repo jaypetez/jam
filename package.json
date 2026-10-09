@@ -1,6 +1,6 @@
 {
   "name": "@nullagency/jam",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Shared multi-user Claude Code sessions: rooms, roles, approvals, short invite links.",
   "type": "module",
   "bin": {
