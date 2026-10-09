@@ -34,6 +34,9 @@ const host = arg("host", process.env.JAM_HOST || "");
 const key = arg("key", process.env.JAM_KEY || (existsSync(path.join(here, ".jam-key")) ? readFileSync(path.join(here, ".jam-key"), "utf8").trim() : ""));
 const only = (arg("only", process.env.JAM_ONLY || "") || "").split(",").map(s => s.trim()).filter(Boolean);
 const claudeBin = process.env.JAM_CLAUDE || "claude";
+// JAM_CLAUDE may name a JS script (the test stubs and `npm run dev`'s fake claude): run it with THIS node, so it needs no shebang or exec bit and works
+// on Windows, where a .cmd shim can't be spawned without a shell. Anything else is spawned as the binary it is. spawn(...claudeCmd(args), opts).
+const claudeCmd = args => /\.(?:m?js|cjs)$/i.test(claudeBin) ? [process.execPath, [claudeBin, ...args]] : [claudeBin, args];
 if (!key) { console.error("need --key, JAM_KEY, or a .jam-key file"); process.exit(1); }
 if (!host) { console.error("need --host, JAM_HOST env var, or JAM_HOST in .env (e.g. jam.yourname.workers.dev)"); process.exit(1); }
 
@@ -176,7 +179,7 @@ async function compact(r, why) {
     const input = handoffInput({ resume, roomName: r.cfg.name, tail }); // transcript text is framed as material (switch.test, 2026-09-11)
     const out = await new Promise(res => {
       let settled = false; const done = payload => { if (settled) return; settled = true; res(payload); };
-      const ch = r.child = spawn(claudeBin, args, { cwd: r.cfg.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+      const ch = r.child = spawn(...claudeCmd(args), { cwd: r.cfg.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
       let o = "", e = ""; ch.stdout.on("data", d => o += d); ch.stderr.on("data", d => e += d);
       ch.on("close", code => done({ code, o, e }));
       // spawn() can fail asynchronously (ENOENT if claudeBin briefly vanished mid self-update, EACCES, …); with no
@@ -272,7 +275,7 @@ async function pollUsage() {
 let authState = null, loginChild = null, lastCode = "";
 function authStatus() {
   try {
-    const r = spawnSync(claudeBin, ["auth", "status"], { encoding: "utf8", timeout: 20000 });
+    const r = spawnSync(...claudeCmd(["auth", "status"]), { encoding: "utf8", timeout: 20000 });
     const j = JSON.parse((r.stdout || "").trim() || "{}");
     return { loggedIn: !!j.loggedIn, email: String(j.email || ""), plan: String(j.subscriptionType || ""), method: String(j.authMethod || "") };
   } catch { return null; }
@@ -289,7 +292,7 @@ function startLogin(by) {
   if (loginChild) { if (authState) sendAuth(authState); return; }             // already waiting on a code: re-show the card
   log("host auth: `claude auth login` started by", by);
   sendAuth({ state: "starting", by: String(by || "").slice(0, 32) });
-  const ch = loginChild = spawn(claudeBin, ["auth", "login"], { cwd: here, env: { ...process.env, CLAUDECODE: undefined }, stdio: ["pipe", "pipe", "pipe"] });
+  const ch = loginChild = spawn(...claudeCmd(["auth", "login"]), { cwd: here, env: { ...process.env, CLAUDECODE: undefined }, stdio: ["pipe", "pipe", "pipe"] });
   let out = "", sentUrl = false;
   const scan = d => {
     out += d; if (out.length > 20000) out = out.slice(-20000);
@@ -420,7 +423,7 @@ function runOne(r, item) {
     const v = runLocalVerdict({ runLocal: true, sandboxed: !!sb, cwdReal: rp(r.cfg.cwd), jamCode: rp(here), jamState: rp(path.join(os.homedir(), ".jam")) });
     if (v.on) sb.env.JAM_RUN_LOCAL = "1"; else log(`#${r.cfg.name}`, `run-commands-locally is ON but ${v.why}: commands still need approval`);
   }
-  const child = r.child = spawn(sbErr ? "/usr/bin/false" : claudeBin, args, { cwd: r.cfg.cwd, env: sb ? sb.env : env, stdio: ["pipe", "pipe", "pipe"] });
+  const child = r.child = spawn(...(sbErr ? ["/usr/bin/false", args] : claudeCmd(args)), { cwd: r.cfg.cwd, env: sb ? sb.env : env, stdio: ["pipe", "pipe", "pipe"] });
   if (sb) child.once("close", () => { try { const k = reapDriver(sb.scratch); if (k.length) log(`#${r.cfg.name}`, "reaped", k.length, "leftover driver process(es)"); } catch {} try { rmSync(sb.scratch, { recursive: true, force: true }); } catch {} });
   // best-effort: a missing/broken `caffeinate` must never take the turn (or the whole bridge) down with it
   if (process.platform === "darwin") { try { r.caffeinate = spawn("caffeinate", ["-i"], { stdio: "ignore" }); r.caffeinate.on("error", e => { log(`#${r.cfg.name}`, "caffeinate unavailable:", e.message); r.caffeinate = null; }); } catch (e) { log(`#${r.cfg.name}`, "caffeinate unavailable:", e.message); } }

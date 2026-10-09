@@ -41,7 +41,7 @@ Every test is a plain Node script: no framework, prints PASS/FAIL lines, exits n
 | --- | --- | --- |
 | Router, catalog, schedules, budgets, turn text | `route`, `catalog`, `tune-router`, `schedule`, `budget`, `turntext` `.test.mjs` | pure |
 | Bridge turn pipeline | `turn-events`, `turn-policy`, `models`, `session-store`, `compaction`, `room-dispatch`, `uploads`, `schedule-cli` `.test.mjs` | pure or temp-dir only |
-| Whole bridge, offline | `test-bridge-turn.mjs` | fake TLS hub plus `test-bridge-claude-stub.mjs`; POSIX and `openssl` only |
+| Whole bridge, offline | `test-bridge-turn.mjs` | fake TLS hub plus `dev/fake-claude.mjs`; POSIX and `openssl` only |
 | Bridge singleton lock | `test-single-bridge.mjs` | throwaway `HOME`; POSIX only |
 | Worker helpers | `worker-lib.test.mjs` | pure |
 | Worker Hub REST and auth | `test-worker-hub.mjs` | imports the **built** `worker.js`; run `./build.sh` first |

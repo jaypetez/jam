@@ -40,6 +40,7 @@ done <<EOF
 $EXEC_FILES
 EOF
 node --check worker.src.js && node --check bridge.mjs && node --check approve-hook.mjs && node --check route.mjs && node --check catalog.mjs && node --check tune-router.mjs && node --check schedule.mjs && node --check browser.mjs && node --check budget.mjs && for m in turntext turn-events turn-policy models session-store compaction room-dispatch uploads schedule-cli sandbox worker-lib jam-url; do node --check "$m.mjs"; done
+for f in scripts/stack.mjs scripts/dev.mjs dev/fake-claude.mjs test-stack.mjs; do node --check "$f"; done
 node route.test.mjs
 node catalog.test.mjs
 node tune-router.test.mjs
