@@ -39,13 +39,17 @@ while IFS= read -r f; do
 done <<EOF
 $EXEC_FILES
 EOF
-node --check worker.src.js && node --check bridge.mjs && node --check approve-hook.mjs && node --check route.mjs && node --check catalog.mjs && node --check tune-router.mjs && node --check schedule.mjs && node --check browser.mjs && node --check budget.mjs
+node --check worker.src.js && node --check bridge.mjs && node --check approve-hook.mjs && node --check route.mjs && node --check catalog.mjs && node --check tune-router.mjs && node --check schedule.mjs && node --check browser.mjs && node --check budget.mjs && for m in turntext turn-events turn-policy models session-store compaction room-dispatch uploads schedule-cli sandbox; do node --check "$m.mjs"; done
 node route.test.mjs
 node catalog.test.mjs
 node tune-router.test.mjs
 node turntext.test.mjs
 node schedule.test.mjs
 node budget.test.mjs
+# bridge.mjs was split into these modules on 2026-10-09 so the turn lifecycle can be tested without a live claude; each owns its tests.
+for t in turn-events turn-policy models session-store compaction room-dispatch uploads schedule-cli; do node "$t.test.mjs"; done
+# ...and none of them may spawn: the spawn()/.on("error") guard below only reads bridge.mjs, so a spawn hiding in a helper module would escape it.
+if grep -lE "node:child_process|child_process" turn-events.mjs turn-policy.mjs models.mjs session-store.mjs compaction.mjs room-dispatch.mjs uploads.mjs schedule-cli.mjs; then echo "jam: FAIL a bridge helper module imports child_process; keep every spawn() in bridge.mjs (its .on(\"error\") guard only reads that file)" >&2; exit 1; fi
 # Driver-sandbox regression gate. This was a P0 ("a driver is effectively RCE today", sam-security 2026-09-15)
 # fixed in classify()/RISKY_BASH on 2026-09-21 (commit 808405e) — but that fix was never wired into this CI
 # gate, so it only ran when someone remembered to run it by hand, against a hand-copied duplicate of classify()
@@ -56,6 +60,7 @@ node test-sandbox.mjs
 node test-sandbox-exec.mjs
 node test-runlocal.mjs
 node test-harmful.mjs
+node test-bridge-turn.mjs   # offline end-to-end: fake TLS hub + stub claude drive the real bridge.mjs through turns, retries, caps, uploads, /compact (skips on Windows or without openssl)
 node test-single-bridge.mjs   # offline: throwaway HOME + unroutable host; the newest full-scope bridge must stop the older one
 # Driver-env guard (2026-10-09 review): a driver turn's claude must never inherit JAM_KEY when .jam-key exists on disk (the hook reads the key from there).
 grep -qF 'item.role === "driver" && existsSync(path.join(here, ".jam-key"))) delete env.JAM_KEY' bridge.mjs || { echo "jam: FAIL bridge.mjs no longer deletes JAM_KEY from the driver turn env (key leak off-macOS / with JAM_DRIVER_SANDBOX=off)" >&2; exit 1; }
@@ -165,4 +170,14 @@ while((m2=re.exec(src))){
 if(found<2){console.error(`jam: FAIL expected at least 2 ws.onmessage handlers (hub + room) in bridge.mjs, found ${found}`);process.exit(1)}
 if(bad.length){console.error(`jam: FAIL ws.onmessage handler(s) at bridge.mjs line(s) ${bad.join("; ")} - a malformed frame there would crash the WHOLE bridge`);process.exit(1)}
 console.log(`jam: onmessage-safety guard ok (${found} handlers, all wrapped)`)'
+# Self-restart watch-list guard (2026-10-09 review): bridge.mjs restarts itself when a file it imports changes on disk, but the list of watched
+# files is hand-written. turntext.mjs was never on it, so edits to it shipped without a restart. Every local import must be watched.
+node -e '
+const src=require("fs").readFileSync("bridge.mjs","utf8");
+const imports=[...src.matchAll(/^import\s[^;]*?from\s+"\.\/([\w.-]+\.mjs)";/gm)].map(m=>m[1]);
+const watch=(/const files = \[([^\]]*(?:\][^\]]*)*?)\]; \/\/ static imports/.exec(src)||[])[1]||"";
+const missing=imports.filter(f=>!watch.includes("\""+f+"\""));
+if(!imports.length||!watch){console.error("jam: FAIL could not find bridge.mjs imports or its self-restart watch list");process.exit(1)}
+if(missing.length){console.error("jam: FAIL bridge.mjs imports "+missing.join(", ")+" but does not watch it for self-restart (add it to the files list near the end of bridge.mjs)");process.exit(1)}
+console.log("jam: self-restart watch list ok ("+imports.length+" imports)")'
 echo "jam: all checks passed"
