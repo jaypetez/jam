@@ -1,5 +1,6 @@
 // End-to-end protocol test. Usage: K=$(cat .jam-key) node test.mjs   (see run-tests.sh)
-const host=process.env.JAM_HOST||"jam.nullagency.io", K=process.env.K, room=process.env.ROOM||"test-e2e", base=`https://${host}`;
+import { httpBase, wsBase, DEFAULT_HOST } from "./jam-url.mjs";
+const host=process.env.JAM_HOST||DEFAULT_HOST, K=process.env.K, room=process.env.ROOM||"test-e2e", base=httpBase(host);
 const j=(u,o)=>fetch(base+u,o).then(r=>r.json());
 const wait=(ws,pred,ms=120000)=>new Promise((res,rej)=>{const t=setTimeout(()=>rej(new Error("timeout waiting: "+pred)),ms);const h=ev=>{const e=JSON.parse(ev.data);if(pred(e)){clearTimeout(t);ws.removeEventListener("message",h);res(e)}};ws.addEventListener("message",h)});
 const open=(url)=>new Promise((res,rej)=>{const ws=new WebSocket(url);ws.onopen=()=>res(ws);ws.onerror=e=>rej(new Error("ws error"))});
@@ -12,11 +13,11 @@ const who=await j(`/api/whoami?k=${drv.token}`);ok("whoami via short token",who.
 const bad=await j(`/api/whoami?k=nope`);ok("bad token rejected",!bad.ok);
 const scoped=await j(`/api/rooms?k=${drv.token}`);ok("driver token cannot list rooms",scoped.ok===false);
 // 2. sockets
-const owner=await open(`wss://${host}/ws?room=${room}&k=${K}&name=Mike`);
+const owner=await open(`${wsBase(host)}/ws?room=${room}&k=${K}&name=Mike`);
 let lastPresence=null;owner.addEventListener("message",ev=>{const e=JSON.parse(ev.data);if(e.type==="presence")lastPresence=e});
 const hello=await wait(owner,e=>e.type==="hello");ok("owner hello",hello.you.role==="owner"&&hello.bridge===true,"bridge="+hello.bridge+" agents="+(hello.agents||[]).length);
-const driver=await open(`wss://${host}/ws?k=${drv.token}`);const dh=await wait(driver,e=>e.type==="hello");ok("driver hello (room from token, name locked)",dh.you.role==="driver"&&dh.you.name==="Peter"&&dh.room===room);
-const viewer=await open(`wss://${host}/ws?k=${vw.token}&name=Watcher`);const viewerSeen=[];viewer.addEventListener("message",ev=>{const e=JSON.parse(ev.data);if(e.type==="approval")viewerSeen.push(e.id)});const vh=await wait(viewer,e=>e.type==="hello");ok("viewer hello",vh.you.role==="viewer");
+const driver=await open(`${wsBase(host)}/ws?k=${drv.token}`);const dh=await wait(driver,e=>e.type==="hello");ok("driver hello (room from token, name locked)",dh.you.role==="driver"&&dh.you.name==="Peter"&&dh.room===room);
+const viewer=await open(`${wsBase(host)}/ws?k=${vw.token}&name=Watcher`);const viewerSeen=[];viewer.addEventListener("message",ev=>{const e=JSON.parse(ev.data);if(e.type==="approval")viewerSeen.push(e.id)});const vh=await wait(viewer,e=>e.type==="hello");ok("viewer hello",vh.you.role==="viewer");
 await new Promise(r=>setTimeout(r,1500));const pres=lastPresence;ok("presence lists 3 with roles",pres&&pres.users.length>=3&&pres.users.some(u=>u.role==="viewer")&&pres.users.some(u=>u.name==="Peter"),JSON.stringify(pres&&pres.users));
 // 3. typing relay
 const tp=wait(owner,e=>e.type==="typing"&&e.from==="Peter"&&e.on===true,5000);driver.send(JSON.stringify({type:"typing",on:true}));await tp;ok("typing relayed driver→owner",true);

@@ -5,10 +5,11 @@
 // No Claude turn: the first card is posted by running browser.mjs directly into the test room.
 // Needs: a deployed Worker, a bridge serving ROOM (run-tests.sh), Playwright, an owner key (K).
 //   K=<owner key> JAM_HOST=<host> ROOM=test-cobrowse node test-cobrowse.mjs
+import { httpBase, wsBase, DEFAULT_HOST } from "./jam-url.mjs";
 import { chromium } from "playwright";
 import { spawnSync } from "node:child_process";
 
-const K = process.env.K, H = process.env.JAM_HOST || "jam.nullagency.io", ROOM = process.env.ROOM || "test-cobrowse";
+const K = process.env.K, H = process.env.JAM_HOST || DEFAULT_HOST, ROOM = process.env.ROOM || "test-cobrowse";
 let fail = 0; const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 
 // White until clicked anywhere, then red. The screenshot after the click shows whether the click actually
@@ -46,18 +47,18 @@ async function clickNewest(p) {
 }
 async function grew(p, from, ms) { const end = Date.now() + ms; while (Date.now() < end) { if (await count(p) > from) return true; await p.waitForTimeout(1000); } return false; }
 
-const owner = await open(`https://${H}/r/${ROOM}?k=${K}`, "Owner");
+const owner = await open(`${httpBase(H)}/r/${ROOM}?k=${K}`, "Owner");
 const n0 = await count(owner);
 ok(n0 >= 1, `owner sees the seed screenshot (${n0} image card)`);
 ok(isWhite(await px(owner)), "seed screenshot shows the unclicked (white) page");
 
 /* ── viewers cannot drive: UI click is ignored, and a hand-sent browser-click is dropped by the Worker ── */
-const inv = await fetch(`https://${H}/api/rooms/${ROOM}/invites?k=${K}`, { method: "POST", body: JSON.stringify({ role: "viewer", name: "Viewer1" }) }).then(r => r.json());
+const inv = await fetch(`${httpBase(H)}/api/rooms/${ROOM}/invites?k=${K}`, { method: "POST", body: JSON.stringify({ role: "viewer", name: "Viewer1" }) }).then(r => r.json());
 ok(inv.ok && inv.token, "viewer invite minted");
-const viewer = await open(`https://${H}/j/${inv.token}`, "Viewer1");
+const viewer = await open(`${httpBase(H)}/j/${inv.token}`, "Viewer1");
 ok(await clickNewest(viewer), "viewer can see and click the screenshot");
 ok(!(await dotShown(viewer)), "viewer's click draws no red dot (ui.html canDrive guard)");
-const ws = new WebSocket(`wss://${H}/ws?room=${encodeURIComponent(ROOM)}&k=${encodeURIComponent(inv.token)}&name=Viewer1`);
+const ws = new WebSocket(`${wsBase(H)}/ws?room=${encodeURIComponent(ROOM)}&k=${encodeURIComponent(inv.token)}&name=Viewer1`);
 await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; setTimeout(() => rej(new Error("ws timeout")), 10000); }).catch(e => ok(false, "viewer socket opened: " + e.message));
 ws.send(JSON.stringify({ type: "browser-click", x: 640, y: 400, callId: "forged" }));
 ok(!(await grew(owner, n0, 10000)), "no new card after the viewer's UI click and forged browser-click (worker.src.js canDrive gate)");

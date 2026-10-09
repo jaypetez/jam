@@ -7,6 +7,10 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 const env = process.env;
+// Which scheme the hub speaks: the same rule as jam-url.mjs (JAM_SCHEME wins; a loopback host is plain http; everything else TLS). Deliberately
+// INLINED rather than imported: this hook is the security gate and stays a single self-contained file, so no second file becomes part of its trust
+// base (a driver who could edit an imported helper could point approvals at a server that always says Allow). jam-url.test.mjs asserts the two stay identical.
+const httpBase = host => { const s = String(env.JAM_SCHEME || "").toLowerCase(); const tls = s === "http" ? false : s === "https" ? true : !/^(?:127(?:\.\d{1,3}){3}|localhost|\[?::1\]?)(?::\d+)?$/i.test(String(host || "")); return (tls ? "https" : "http") + "://" + host; };
 const SELF_PATH = fileURLToPath(import.meta.url); // this file — must never be driver-writable, wherever JAM_CWD points
 const read = () => new Promise(res => { let s = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", d => s += d); process.stdin.on("end", () => res(s)); });
 
@@ -364,7 +368,7 @@ if (isMain) (async () => {
   let hubKey = env.JAM_KEY || ""; if (!hubKey) { try { hubKey = fs.readFileSync(path.join(JAM_DIR, ".jam-key"), "utf8").trim(); } catch {} }
   if (!env.JAM_HOST || !hubKey || !env.JAM_ROOM) { console.error("jam: no room to ask for approval (JAM_HOST/JAM_KEY/JAM_ROOM unset); blocked"); process.exit(2); }
 
-  const base = `https://${env.JAM_HOST}/api/approve`; const q = `?k=${encodeURIComponent(hubKey)}&room=${encodeURIComponent(env.JAM_ROOM)}`;
+  const base = `${httpBase(env.JAM_HOST)}/api/approve`; const q = `?k=${encodeURIComponent(hubKey)}&room=${encodeURIComponent(env.JAM_ROOM)}`;
   let id;
   try {
     const r = await fetch(base + q, { method: "POST", body: JSON.stringify({ from: env.JAM_FROM || "?", tool, summary: c.summary.slice(0, 2000), detail: JSON.stringify(input).slice(0, 6000) }) });

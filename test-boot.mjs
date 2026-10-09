@@ -3,13 +3,14 @@
 // presence frames never leak tokens to non-owner sockets (only owner sees who-to-boot).
 // Needs: a deployed Worker, a bridge serving the test room, Playwright, an owner key (K).
 //   K=<owner key> JAM_HOST=<host> node test-boot.mjs
+import { httpBase, wsBase, DEFAULT_HOST } from "./jam-url.mjs";
 import { chromium } from "playwright";
 
-const K = process.env.K, H = process.env.JAM_HOST || "jam.nullagency.io", ROOM = process.env.ROOM || "test-qa-boot-feature";
+const K = process.env.K, H = process.env.JAM_HOST || DEFAULT_HOST, ROOM = process.env.ROOM || "test-qa-boot-feature";
 let fail = 0; const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 
 async function mkInvite(role, name) {
-  const r = await fetch(`https://${H}/api/rooms/${ROOM}/invites?k=${K}`, { method: "POST", body: JSON.stringify({ role, name }) }).then(r => r.json());
+  const r = await fetch(`${httpBase(H)}/api/rooms/${ROOM}/invites?k=${K}`, { method: "POST", body: JSON.stringify({ role, name }) }).then(r => r.json());
   if (!r.ok) throw new Error("invite failed: " + JSON.stringify(r));
   return r.token;
 }
@@ -45,11 +46,11 @@ const driver = await frameCtx("Driver1");
 const driver2 = await frameCtx("Driver2");
 const viewer = await frameCtx("Viewer1");
 
-await owner.p.goto(`https://${H}/r/${ROOM}?k=${K}`);
+await owner.p.goto(`${httpBase(H)}/r/${ROOM}?k=${K}`);
 await owner.p.waitForTimeout(1200);
-await driver.p.goto(`https://${H}/j/${driverTok}`);
-await driver2.p.goto(`https://${H}/j/${driver2Tok}`);
-await viewer.p.goto(`https://${H}/j/${viewerTok}`);
+await driver.p.goto(`${httpBase(H)}/j/${driverTok}`);
+await driver2.p.goto(`${httpBase(H)}/j/${driver2Tok}`);
+await viewer.p.goto(`${httpBase(H)}/j/${viewerTok}`);
 await owner.p.waitForTimeout(2500); // let everyone join + presence settle
 
 /* ── step 3: presence isolation ── */
@@ -97,9 +98,9 @@ ok(dialogMsg === "Boot Driver1 from the room?\n\nThey won't be able to rejoin wi
   `confirm dialog text exact match (got: ${JSON.stringify(dialogMsg)}) — ui.html:341`);
 const driverStillOpenAfterCancel = await driver.p.evaluate(() => window.__closes.length === 0);
 ok(driverStillOpenAfterCancel, "cancelling the confirm dialog did nothing — Driver1's socket is still open, no close event fired");
-const resolveAfterCancel = await fetch(`https://${H}/hub`).catch(() => null); // no-op sanity, real check below
-const stillResolves = await fetch(`https://${H}/`).then(() => true).catch(() => false); // liveness only
-const resolveStillOk = await (await fetch(`https://${H}/api/whoami?k=${driverTok}`)).json();
+const resolveAfterCancel = await fetch(`${httpBase(H)}/hub`).catch(() => null); // no-op sanity, real check below
+const stillResolves = await fetch(`${httpBase(H)}/`).then(() => true).catch(() => false); // liveness only
+const resolveStillOk = await (await fetch(`${httpBase(H)}/api/whoami?k=${driverTok}`)).json();
 ok(resolveStillOk.ok, "token still resolves after a cancelled boot (not revoked)");
 
 /* ── step 2 (real boot): confirm path ── */
@@ -146,19 +147,19 @@ const staleOnBystander = await driver2.p.locator(".person .nm").allTextContents(
 ok(!staleOnBystander.includes("Driver1"), `KNOWN BUG — Driver2 (uninvolved bystander)'s People panel should also drop Driver1 within ~8s (got: ${JSON.stringify(staleOnBystander)}) — same root cause, confirms this is a presence broadcast bug, not owner-UI-only`);
 
 /* ── step 5: token revocation is real, not just a UI close ── */
-const resolveAfterBoot = await fetch(`https://${H}/api/whoami?k=${driverTok}`).then(r => r.json());
+const resolveAfterBoot = await fetch(`${httpBase(H)}/api/whoami?k=${driverTok}`).then(r => r.json());
 ok(resolveAfterBoot.ok === false, `owner-scoped whoami for the revoked token now fails (got ${JSON.stringify(resolveAfterBoot)}) — worker.src.js:48 this.revoked[tok]`);
 
 // hit the Hub's /resolve directly is internal-only (DO-to-DO), so we prove revocation the way any real client would:
 // re-navigate to the same /j/ link and confirm the "Link not valid" screen renders, no rejoin possible.
-await driver.p.goto(`https://${H}/j/${driverTok}`);
+await driver.p.goto(`${httpBase(H)}/j/${driverTok}`);
 const linkInvalid = await driver.p.waitForSelector("text=Link not valid", { timeout: 8000 }).then(() => true).catch(() => false);
 ok(linkInvalid, "re-visiting the revoked /j/ link shows \"Link not valid\" — cannot rejoin with the old token");
 
 // and prove the raw socket path is dead too: try to open a new /ws with the revoked token directly.
 const wsRejected = await driver.p.evaluate(async ({ host, tok, room }) => {
   return await new Promise(resolve => {
-    const ws = new WebSocket(`wss://${host}/ws?k=${encodeURIComponent(tok)}&room=${encodeURIComponent(room)}&name=Driver1Retry`);
+    const ws = new WebSocket(`${wsBase(host)}/ws?k=${encodeURIComponent(tok)}&room=${encodeURIComponent(room)}&name=Driver1Retry`);
     const timer = setTimeout(() => resolve("timeout"), 6000);
     ws.onopen = () => { clearTimeout(timer); resolve("opened"); };
     ws.onerror = () => { clearTimeout(timer); resolve("error"); };

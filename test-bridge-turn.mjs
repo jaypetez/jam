@@ -54,7 +54,7 @@ const port = server.address().port;
 
 // The bridge reads the hub key from env/--key, but a driver turn only drops JAM_KEY when .jam-key exists on disk (the hook reads it there).
 const keyFile = path.join(here, ".jam-key"), madeKey = !fs.existsSync(keyFile); if (madeKey) fs.writeFileSync(keyFile, "testkey\n");
-const env = { ...process.env, HOME: home, USERPROFILE: home, JAM_HOST: `127.0.0.1:${port}`, JAM_KEY: "testkey", JAM_ONLY: roomName, JAM_CLAUDE: path.join(here, "test-bridge-claude-stub.mjs"), JAM_CATALOG: "off", NODE_TLS_REJECT_UNAUTHORIZED: "0", JAM_DRIVER_SANDBOX: "off" };
+const env = { ...process.env, HOME: home, USERPROFILE: home, JAM_HOST: `127.0.0.1:${port}`, JAM_KEY: "testkey", JAM_ONLY: roomName, JAM_CLAUDE: path.join(here, "test-bridge-claude-stub.mjs"), JAM_CATALOG: "off", NODE_TLS_REJECT_UNAUTHORIZED: "0", JAM_DRIVER_SANDBOX: "off", JAM_SCHEME: "https" /* the fake hub is TLS on a loopback address, which would otherwise default to plain ws (jam-url.mjs) */ };
 delete env.JAM_ROOM; delete env.JAM_FROM; delete env.JAM_FROM_ROLE; delete env.JAM_TURN; delete env.JAM_CWD;
 const bridge = spawn("node", ["bridge.mjs"], { cwd: here, env, stdio: ["ignore", "pipe", "pipe"] });
 let bout = ""; bridge.stdout.on("data", d => bout += d); bridge.stderr.on("data", d => bout += d); bridge.on("error", e => { bout += "spawn error " + e.message; });

@@ -7,10 +7,11 @@
 // drives a real turn with a Bash tool call and watches topAct via a MutationObserver for the entire turn.
 //   K=<owner key> JAM_HOST=<host> ROOM=<room> node test-statusbar-live.mjs
 // Needs: a deployed/served Worker + a bridge serving ROOM (run-tests.sh does this), Playwright.
+import { httpBase, DEFAULT_HOST } from "./jam-url.mjs";
 import { chromium } from "playwright";
 
-const K = process.env.K, H = process.env.JAM_HOST || "jam.nullagency.io", ROOM = process.env.ROOM || "test-qa-browser";
-const INSECURE = process.env.JAM_INSECURE_TLS === "1"; // set for a local https:// dev server with a self-signed cert
+const K = process.env.K, H = process.env.JAM_HOST || DEFAULT_HOST, ROOM = process.env.ROOM || "test-qa-browser";
+const INSECURE = process.env.JAM_INSECURE_TLS === "1"; // set for a local https:// dev server with a self-signed cert (a plain-http local stack needs nothing: see jam-url.mjs)
 let fail = 0; const ok = (c, m, extra = "") => { console.log((c ? "PASS " : "FAIL ") + m, extra); if (!c) fail++; };
 
 // Anything matching these should NEVER appear in the status bar (topAct) — raw command text, absolute host
@@ -29,7 +30,7 @@ await ctx.addInitScript(() => { localStorage.setItem("jam.name", "Olga"); window
   const W = window.WebSocket; window.WebSocket = class extends W { constructor(...a) { super(...a); this.addEventListener("message", e => { try { if (this.url.includes("/ws?") && JSON.parse(e.data).type === "hello") window.__hellos++; } catch {} }); } };
 });
 const p = await ctx.newPage();
-await p.goto(`https://${H}/r/${ROOM}?k=${K}`); // jam is always served over TLS; INSECURE (above) only affects cert trust for a local self-signed dev server
+await p.goto(`${httpBase(H)}/r/${ROOM}?k=${K}`); // the scheme comes from jam-url.mjs (https for real hosts, http for a loopback dev stack); INSECURE (above) only affects cert trust
 await p.waitForSelector("textarea", { timeout: 20000 });
 await p.waitForFunction(() => window.__hellos >= 1, null, { timeout: 30000 }); // the socket is really open — a fixed delay raced it under load
 await p.waitForTimeout(250);

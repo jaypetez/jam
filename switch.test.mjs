@@ -6,12 +6,13 @@
 // Run against a bridge started with test hooks (run-tests.sh does this):
 //   JAM_ONLY=test-switch JAM_CAPPED=claude-haiku-4-5-20251001,claude-opus-5 JAM_WINDOWS='{"claude-sonnet-5":20000}' node bridge.mjs
 //   K=<owner key> JAM_HOST=<host> ROOM=test-switch node switch.test.mjs
-const K = process.env.K, H = process.env.JAM_HOST || "jam.nullagency.io", ROOM = process.env.ROOM || "test-switch";
+import { httpBase, wsBase, DEFAULT_HOST } from "./jam-url.mjs";
+const K = process.env.K, H = process.env.JAM_HOST || DEFAULT_HOST, ROOM = process.env.ROOM || "test-switch";
 const HAIKU = "claude-haiku-4-5-20251001", SONNET = "claude-sonnet-5", SONNET_WINDOW = 20000;
 let fail = 0; const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 
-const pin = async model => (await fetch(`https://${H}/api/rooms/${ROOM}/settings?k=${K}`, { method: "POST", body: JSON.stringify({ model }) })).json();
-const ws = await new Promise((res, rej) => { const w = new WebSocket(`wss://${H}/ws?room=${ROOM}&k=${K}&name=Mike`); w.onopen = () => res(w); w.onerror = () => rej(new Error("ws error")); });
+const pin = async model => (await fetch(`${httpBase(H)}/api/rooms/${ROOM}/settings?k=${K}`, { method: "POST", body: JSON.stringify({ model }) })).json();
+const ws = await new Promise((res, rej) => { const w = new WebSocket(`${wsBase(H)}/ws?room=${ROOM}&k=${K}&name=Mike`); w.onopen = () => res(w); w.onerror = () => rej(new Error("ws error")); });
 const evs = []; ws.onmessage = ev => evs.push(JSON.parse(ev.data));
 const say = t => ws.send(JSON.stringify({ type: "say", text: t }));
 const waitFor = (pred, ms) => new Promise(res => { const t0 = Date.now(); const iv = setInterval(() => { const hit = evs.find(pred); if (hit || Date.now() - t0 > ms) { clearInterval(iv); res(hit || null); } }, 250); });

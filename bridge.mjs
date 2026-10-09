@@ -2,6 +2,7 @@
 // jam bridge — runs Claude Code sessions on this machine (one per room) and streams them to jam rooms.
 // usage: node bridge.mjs [--host jam.example.com] [--key <owner key>] [--only room1,room2]
 //   env: JAM_HOST, JAM_KEY (or a .jam-key file next to this script), JAM_CLAUDE (path to the claude binary)
+import { wsBase } from "./jam-url.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, appendFileSync, unlinkSync, renameSync, rmSync, realpathSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -618,7 +619,7 @@ function openRoom(cfg) {
   rooms.set(cfg.name, r);
   const connect = () => {
     if (r.closed) return;
-    const ws = r.ws = new WebSocket(`wss://${host}/ws?room=${encodeURIComponent(cfg.name)}&k=${encodeURIComponent(key)}&role=bridge&name=bridge`);
+    const ws = r.ws = new WebSocket(`${wsBase(host)}/ws?room=${encodeURIComponent(cfg.name)}&k=${encodeURIComponent(key)}&role=bridge&name=bridge`);
     ws.onopen = () => { log(`#${cfg.name}`, "connected", "cwd", cfg.cwd, cfg.model ? "model " + cfg.model : ""); r.send(sessionEvent(r)); r.send({ type: "agents", list: agents }); if (lastUsage) r.send(lastUsage); r.send({ type: "colors", colors: userColors }); 
       // Always reassert known auth state on (re)connect, even "in": a room can be showing a stale "signed out" card
       // from before a bridge restart, and the old `!== "in"` guard here meant a healthy restart never corrected it —
@@ -701,7 +702,7 @@ function purgeTestRoom(name) {
 
 /* ── hub: room registry ── */
 function connectHub() {
-  const ws = hubWs = new WebSocket(`wss://${host}/hub?k=${encodeURIComponent(key)}&role=bridge`);
+  const ws = hubWs = new WebSocket(`${wsBase(host)}/hub?k=${encodeURIComponent(key)}&role=bridge`);
   ws.onopen = () => { log("hub connected", host, only.length ? "only " + only.join(",") : ""); if (M.catalog) ws.send(JSON.stringify(M.catalog)); if (lastPlan) ws.send(JSON.stringify(lastPlan)); };
   ws.onmessage = ev => {
     // A thrown error anywhere in this handler propagates straight through the WebSocket's dispatchEvent and kills
@@ -739,7 +740,7 @@ setInterval(refreshCatalog, 60 * 60 * 1000); refreshCatalog();
 if (process.ppid === 1 || process.env.JAM_AUTORESTART) {
   setInterval(pollUsage, USAGE_MS); pollUsage();
   const { watchFile } = await import("node:fs");
-  const files = [fileURLToPath(import.meta.url), hookPath, ...["route.mjs", "catalog.mjs", "schedule.mjs", "tune-router.mjs", "budget.mjs", "sandbox.mjs", "turntext.mjs", "turn-events.mjs", "turn-policy.mjs", "models.mjs", "session-store.mjs", "compaction.mjs", "room-dispatch.mjs", "uploads.mjs", "schedule-cli.mjs", "sandbox/driver.sb", "sandbox/bashwrap.sh"].map(f => path.join(here, f))]; // static imports: a change needs a restart too
+  const files = [fileURLToPath(import.meta.url), hookPath, ...["route.mjs", "catalog.mjs", "schedule.mjs", "tune-router.mjs", "budget.mjs", "sandbox.mjs", "turntext.mjs", "turn-events.mjs", "turn-policy.mjs", "models.mjs", "session-store.mjs", "compaction.mjs", "room-dispatch.mjs", "uploads.mjs", "schedule-cli.mjs", "jam-url.mjs", "sandbox/driver.sb", "sandbox/bashwrap.sh"].map(f => path.join(here, f))]; // static imports: a change needs a restart too
   let want = false, wantSince = 0;
   for (const f of files) watchFile(f, { interval: 5000 }, () => { if (!want) { log("code changed on disk — will restart when idle"); wantSince = Date.now(); } want = true; });
   // A stuck room (2026-10-08: a 15+ min turn) used to make this wait forever — a real fix sat undeployed in
