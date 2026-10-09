@@ -11,19 +11,25 @@ jam runs shared, multi-user Claude Code sessions. Each **room** is one `claude -
 ## Commands
 
 ```sh
-./check.sh                 # offline CI gate: exec-bit guard, node --check, unit tests, sandbox/hook tests, build, regression guards
+npm run verify             # EVERYTHING locally: check.sh + test:stack + e2e, on a real local stack (real Worker on workerd, real bridge, fake claude, Chromium)
+npm run dev                # the local stack to click around in (owner/driver/viewer links); Ctrl-C tears it down
+npm run e2e                # the live end-to-end suite against that local stack (`-- --only <name>` for one test, `--keep` to keep state, `--real` for your claude)
+npm run test:stack         # the real Worker + Durable Objects + bridge round trip, and clean teardown (about 5 s)
+npm run setup:e2e          # once: download the Chromium build Playwright needs
+./check.sh                 # offline CI gate (npm test): exec-bit guard, node --check, unit tests, sandbox/hook tests, build, regression guards
 node route.test.mjs        # run one unit test (also catalog, tune-router, turntext, schedule, budget .test.mjs)
 node test-sandbox.mjs      # approval-hook / driver-sandbox gates (also test-sandbox-exec, test-runlocal, test-harmful .mjs)
 ./build.sh                 # regenerate worker.js from ui.html + budget.mjs + worker.src.js
-./run-tests.sh             # end-to-end suite against the LIVE deployed Worker (needs .jam-key, JAM_HOST; Playwright via `npm i`)
+./run-tests.sh             # the same live suite against a DEPLOYED Worker (needs .jam-key, JAM_HOST; touches that Worker): prefer `npm run e2e`
 ./run.sh                   # start the host bridge (supervises bridge.mjs, restarts it on exit)
 ./deploy.sh                # build + bundle gate + deploy to Cloudflare + verify build hash; `./deploy.sh --check` = gate only
 npx markdownlint-cli2 "**/*.md" "#node_modules"   # Markdown lint (config: .markdownlint.jsonc)
 actionlint                 # workflow lint; or: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color
 ```
 
-- CI (`.github/workflows/ci.yml`) has two jobs, both required on `main`: `check` (`npm ci && ./check.sh` on Node 22; the bridge needs the global `WebSocket`, which Node 18 and 20 lack) and `lint` (markdownlint-cli2 over all Markdown, plus actionlint).
-- `check.sh` is the whole offline gate: the unit tests, the sandbox/hook tests, and `test-worker-hub.mjs` (imports the built `worker.js` and drives the Hub REST API and auth routing with a fake Durable Object runtime; the websocket paths and the Room DO need workerd and are covered only by `run-tests.sh`), `test-bridge-turn.mjs` (a fake TLS hub plus a stub `claude` drive the real `bridge.mjs` through turns, retries, usage caps, uploads and `/compact`; it skips on Windows or without `openssl`). The `auth`, `compact`, `switch`, `reconnect` and `runlocal` `.test.mjs` files and `test.mjs`/`test-upload`/`test-cobrowse`/`test-boot`/`test-status-bar` are *not* offline: they talk to the live Worker and run only via `run-tests.sh`.
+- CI (`.github/workflows/ci.yml`) has three jobs: `check` (`npm ci && ./check.sh` on Node 22; the bridge needs the global `WebSocket`, which Node 18 and 20 lack), `lint` (markdownlint-cli2 over all Markdown, plus actionlint) and `e2e` (installs Chromium, runs `npm run test:stack` and `npm run e2e`). `check` and `lint` are required on `main`; make `e2e` required in the repo's branch protection once it has proven stable. `deploy.yml` deploys behind a `production` environment approval and is not part of this loop.
+- The local loop (`scripts/stack.mjs`, `scripts/e2e.mjs`, `scripts/dev.mjs`, `dev/fake-claude*.mjs`) is described in `docs/DEV.md`. It runs plain http/ws on 127.0.0.1 (`jam-url.mjs`), in a throwaway directory, and never touches `~/.jam` or production. `runlocal.test.mjs` is macOS-only (Seatbelt) and is reported SKIPPED elsewhere.
+- `check.sh` is the whole offline gate: the unit tests, the sandbox/hook tests, and `test-worker-hub.mjs` (imports the built `worker.js` and drives the Hub REST API and auth routing with a fake Durable Object runtime; the real websocket paths and Room DO are covered by `test-stack.mjs` and `npm run e2e`), `test-bridge-turn.mjs` (a fake TLS hub plus a stub `claude` drive the real `bridge.mjs` through turns, retries, usage caps, uploads and `/compact`; it skips on Windows or without `openssl`). The `auth`, `compact`, `switch`, `reconnect` and `runlocal` `.test.mjs` files and `test.mjs`/`test-upload`/`test-cobrowse`/`test-boot`/`test-status-bar` are *not* offline: they talk to the live Worker and run only via `run-tests.sh`.
 - `check.sh` assumes macOS/Linux. Under Windows Git Bash, the exec-bit guard false-fails on any shebang file stored as `100644` (e.g. `auth.test.mjs`), and several hook/sandbox tests fail on Windows paths. Use WSL, or run the pure unit tests individually.
 - Unit tests are plain Node scripts with no test framework; each prints a pass/fail summary and exits non-zero on failure.
 - `run-tests.sh` creates and deletes `test-*` rooms on the real Worker; normal bridges ignore `test-*` rooms. If you are running *inside* a jam room, the inherited `JAM_*` env points test bridges at the live room. Strip it first, as `nightly.sh` does: `env -u JAM_HOST -u JAM_KEY -u JAM_ROOM -u JAM_FROM -u JAM_FROM_ROLE -u JAM_TURN -u JAM_CWD ./run-tests.sh`.

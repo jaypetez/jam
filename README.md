@@ -155,17 +155,24 @@ Rotate the owner key: `openssl rand -hex 24 > .jam-key && ./deploy.sh`, then res
 
 ## Tests
 
-`npm test` (`./check.sh`) is the offline gate CI runs, and needs no network or credentials: syntax checks, unit tests for the router, catalog,
-schedules, budgets and every bridge module, the approval-hook and driver-sandbox tests, `test-worker-hub.mjs` (the Worker's Hub REST API and
-auth, run against the built bundle with a fake Durable Object runtime) and `test-bridge-turn.mjs` (the real bridge against a fake hub and a stub
-`claude`: turns, retries, usage-cap fallback, uploads, `/compact`). Any single test is `node <file>`. See [AGENTS.md](AGENTS.md) for the full map and
-a one-line Docker command for Windows.
+jam tests itself end to end, on your machine, with nothing external. `npm run verify` is the command to run before you say a change works:
 
-`./run-tests.sh` is the end-to-end suite against your **deployed** Worker: it creates `test-*` rooms (normal bridges ignore those), starts a
-dedicated bridge, exercises tokens, roles, presence, typing, approvals, queue cancel, history, export, uploads, revocation, and `/compact`
-(handoff written, fresh session, facts survive), then cleans up. With Playwright installed (`npm i`), it also runs `reconnect.test.mjs`: a
-browser that loses its socket mid-reply must still end up showing the full reply — the room hands a reconnecting tab the in-flight text, and the
-bridge holds events it couldn't deliver and replays them.
+```bash
+npm ci && npm run setup:e2e     # once: dependencies, and the Chromium build the browser tests need
+npm run verify                  # the whole loop, about five minutes
+```
+
+- `npm test` (`./check.sh`) is the fast offline gate CI runs: syntax checks, unit tests for the router, catalog, schedules, budgets and every bridge
+  module, the approval-hook and driver-sandbox tests, and the real bridge against a fake hub and a stub `claude`. No network, no credentials.
+- `npm run test:stack` starts the **real Worker on workerd** (real Durable Objects) and a real bridge in a throwaway directory and checks roles,
+  presence, a full turn, transcript storage across a reconnect, revocation, and that teardown leaves nothing behind.
+- `npm run e2e` runs the live end-to-end suite (protocol, uploads, `/compact`, model switching, host login, status bar, reconnect, boot and
+  co-browsing in real Chromium) against that local stack, answered by a deterministic fake `claude`. `npm run e2e:real` uses your own `claude`.
+- `npm run dev` runs the same stack for you to click around in.
+
+Any single test is `node <file>` or `npm run e2e -- --only <name>`. `./run-tests.sh` runs the same live suite against a **deployed** Worker (it
+creates `test-*` rooms there, so use it only on a Worker you own). CI runs `check`, `lint` and `e2e`. See [docs/DEV.md](docs/DEV.md) and
+[AGENTS.md](AGENTS.md); the macOS-only parts (`runlocal.test.mjs`, the sandbox) are reported as skipped elsewhere, never as passed.
 
 ## Files
 
@@ -185,6 +192,7 @@ Sessions persist in `~/.jam/sessions/<room>.json`; delete one to start that room
 ## Documentation
 
 - [docs/PROTOCOL.md](docs/PROTOCOL.md) — sockets, message types, roles and the REST API
+- [docs/DEV.md](docs/DEV.md) — the local dev and test loop
 - [SCHEDULER.md](SCHEDULER.md) — scheduled turns
 - [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) — for AI coding agents working on jam
 - [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CHANGELOG.md](CHANGELOG.md)

@@ -40,7 +40,7 @@ done <<EOF
 $EXEC_FILES
 EOF
 node --check worker.src.js && node --check bridge.mjs && node --check approve-hook.mjs && node --check route.mjs && node --check catalog.mjs && node --check tune-router.mjs && node --check schedule.mjs && node --check browser.mjs && node --check budget.mjs && for m in turntext turn-events turn-policy models session-store compaction room-dispatch uploads schedule-cli sandbox worker-lib jam-url; do node --check "$m.mjs"; done
-for f in scripts/stack.mjs scripts/dev.mjs dev/fake-claude.mjs test-stack.mjs; do node --check "$f"; done
+for f in scripts/stack.mjs scripts/dev.mjs dev/fake-claude.mjs dev/fake-claude-rules.mjs test-stack.mjs; do node --check "$f"; done
 node route.test.mjs
 node catalog.test.mjs
 node tune-router.test.mjs
@@ -50,6 +50,7 @@ node budget.test.mjs
 # bridge.mjs was split into these modules on 2026-10-09 so the turn lifecycle can be tested without a live claude; each owns its tests.
 for t in turn-events turn-policy models session-store compaction room-dispatch uploads schedule-cli; do node "$t.test.mjs"; done
 node jam-url.test.mjs
+node fake-claude.test.mjs   # the fake claude's rules and CLI (dev/): what the offline end-to-end loop answers with
 # Scheme guard (2026-10-09): clients reach the hub through jam-url.mjs (httpBase/wsBase) so a loopback dev stack can speak plain http/ws. A literal
 # `${host}`-style https:// or wss:// URL in a client puts the production-only assumption back and silently breaks `npm run e2e`.
 if grep -nE '`(https|wss)://\$\{(host|H|env\.JAM_HOST)\}' bridge.mjs approve-hook.mjs browser.mjs test.mjs test-*.mjs *.test.mjs 2>/dev/null; then echo "jam: FAIL a client hard-codes https:// or wss:// for the hub; use httpBase()/wsBase() from jam-url.mjs" >&2; exit 1; fi

@@ -18,9 +18,13 @@ under Git Bash. [AGENTS.md](AGENTS.md#verify-a-change) has a one-line Docker com
 
 ```sh
 git clone https://github.com/jaypetez/jam.git && cd jam
-npm ci
-npm test        # = ./check.sh, the whole offline gate; no network and no credentials needed
+npm ci && npm run setup:e2e   # dependencies, and the Chromium build the browser tests need (once per machine)
+npm test                      # = ./check.sh, the fast offline gate (about a minute); no network or credentials needed
+npm run verify                # everything, on a real local stack: real Worker on workerd, real bridge, fake claude, real Chromium (about 5 minutes)
+npm run dev                   # the same stack to click around in: prints owner, driver and viewer links
 ```
+
+None of this touches production or your `~/.jam`. [docs/DEV.md](docs/DEV.md) explains how the loop works and how to extend it.
 
 ## Making changes
 
@@ -36,13 +40,15 @@ npm test        # = ./check.sh, the whole offline gate; no network and no creden
 3. Run the checks CI runs:
 
    ```sh
-   npm test                                              # offline gate
-   node route.test.mjs                                   # or any single test: they are plain Node scripts
+   npm run verify                                        # everything: offline gate, local stack, end-to-end suite
+   npm test                                              # just the fast offline gate
+   npm run e2e -- --only compact                         # one end-to-end test; or node route.test.mjs for a unit test
    npx markdownlint-cli2 "**/*.md" "#node_modules"       # if you touched Markdown
    ```
 
-   CI also lints workflows with [actionlint](https://github.com/rhysd/actionlint). `./run-tests.sh` is the end-to-end suite against a deployed
-   Worker; it creates and deletes `test-*` rooms there, so only run it against a Worker you own (see [Tests](README.md#tests)).
+   CI runs three jobs: `check` (the offline gate), `lint` (Markdown and workflows, with [actionlint](https://github.com/rhysd/actionlint)) and `e2e`
+   (the local stack and the live suite). `./run-tests.sh` runs that same suite against a *deployed* Worker and creates and deletes `test-*` rooms
+   there, so only use it on a Worker you own (see [Tests](README.md#tests)). `runlocal.test.mjs` needs macOS and is reported as skipped elsewhere.
 4. Push your branch and open a pull request against `main`, filling in the pull request template.
 
 ### Rules CI enforces

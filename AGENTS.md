@@ -10,9 +10,15 @@ spawning are security-sensitive.
 ## Verify a change
 
 ```sh
-npm ci
-npm test            # = ./check.sh, the whole offline gate. Exit 0 and the last line "jam: all checks passed" mean green.
+npm ci && npm run setup:e2e     # once per machine: dependencies, and the Chromium build your Playwright version needs
+npm test                        # = ./check.sh, the fast offline gate (about a minute). Last line "jam: all checks passed" means green.
+npm run verify                  # = npm test + npm run test:stack + npm run e2e: everything, on a real local stack (about 5 minutes)
 ```
+
+`npm run verify` is the command that proves a change works: it starts the **real Worker on workerd** (real Durable Objects), a **real bridge**, a
+deterministic **fake claude** and **real headless Chromium**, all in a throwaway directory, and runs the live end-to-end suite against them. It
+needs no credentials, no quota and no network beyond `npm`, and cannot touch production. [docs/DEV.md](docs/DEV.md) explains the loop. Run
+`npm run dev` for an interactive stack (owner, driver and viewer links) to poke at a change by hand.
 
 `npm test` needs `bash`, Node 22+, `git`, and the usual `shasum`, `base64`, `sed`, `awk`, `grep`, plus `ps` (`procps`) for the single-bridge test.
 `openssl` is optional: the end-to-end bridge test makes a throwaway certificate with it and skips without it. It is offline: no network, no credentials, no Cloudflare. It stops at the first failure (`set -e`).
@@ -44,20 +50,26 @@ Every test is a plain Node script: no framework, prints PASS/FAIL lines, exits n
 | Whole bridge, offline | `test-bridge-turn.mjs` | fake TLS hub plus `dev/fake-claude.mjs`; POSIX and `openssl` only |
 | Bridge singleton lock | `test-single-bridge.mjs` | throwaway `HOME`; POSIX only |
 | Worker helpers | `worker-lib.test.mjs` | pure |
-| Worker Hub REST and auth | `test-worker-hub.mjs` | imports the **built** `worker.js`; run `./build.sh` first |
+| Worker Hub REST and auth | `test-worker-hub.mjs` | imports the **built** `worker.js` with a fake Durable Object runtime; run `./build.sh` first |
+| Scheme selection, fake claude | `jam-url.test.mjs`, `fake-claude.test.mjs` | pure; the fake claude's rules and CLI |
+| Real Worker + real bridge | `test-stack.mjs` (`npm run test:stack`) | wrangler and workerd; about 5 s; checks teardown leaves nothing behind |
+| The live suite, locally | `npm run e2e`: `test.mjs`, `test-upload`, `compact`, `test-status-bar`, `reconnect`, `test-statusbar-live`, `test-boot`, `test-cobrowse`, `auth`, `switch` | local stack, fake claude; browser tests need `npm run setup:e2e`; `--only <name>` runs one |
 | Approval hook and driver sandbox | `test-sandbox.mjs`, `test-harmful.mjs`, `test-runlocal.mjs`, `test-sandbox-exec.mjs` | the last needs macOS Seatbelt and skips elsewhere |
 
-**Not offline, not in `npm test`:** `run-tests.sh` and everything it drives (`test.mjs`, `test-upload`, `test-boot`, `test-cobrowse`,
-`test-status-bar`, `auth`, `compact`, `switch`, `reconnect` and `runlocal` `.test.mjs`). They talk to the live deployed Worker.
-**Do not run them** unless the maintainer has asked you to and given you the host and key. They create and delete `test-*` rooms on
-production, and from inside a jam room the inherited `JAM_*` environment points their bridges at the live room.
+`run-tests.sh` runs those same live test files against a **deployed** Worker. **Do not run it** unless the maintainer has asked you to and given
+you the host and key: it creates and deletes `test-*` rooms on production, and from inside a jam room the inherited `JAM_*` environment points its
+bridges at the live room. `npm run e2e` is the safe way to run them.
 
-Not covered by any offline test: the Worker's websocket paths and the Room Durable Object (they need workerd), the macOS Seatbelt profile,
-the browser UI, and anything that needs a real `claude` login. Say so in the PR rather than implying they were tested.
+Not covered by any local test, so say so in the PR rather than implying it was tested:
+
+- **`runlocal.test.mjs` and `test-sandbox-exec.mjs` need macOS.** Card-free driver commands exist only under the Seatbelt sandbox, so `npm run e2e`
+  reports that stage SKIPPED (never passed) on Windows and Linux.
+- **Real Claude behaviour.** The fake claude is a model of the CLI. `npm run e2e:real` runs the suite against your own `claude` (spends quota).
+- **Deployment**: `deploy.sh`, Cloudflare account behaviour, real DNS and TLS.
 
 ## Hard rules
 
-- **Never run `deploy.sh`, `deploy-idle.sh` or `run-tests.sh`.** A deploy recycles every Durable Object and drops every socket. `./deploy.sh --check` (build plus bundle gate, no upload) is safe, but it creates an untracked `.jam-key` if none exists; delete that file if you did not already have one.
+- **Never run `deploy.sh`, `deploy-idle.sh` or `run-tests.sh`.** (`npm run dev`, `npm run e2e` and `npm run verify` are safe: they start a private stack on 127.0.0.1.) A deploy recycles every Durable Object and drops every socket. `./deploy.sh --check` (build plus bundle gate, no upload) is safe, but it creates an untracked `.jam-key` if none exists; delete that file if you did not already have one.
 - **Never commit** `.jam-key`, `.env*` (except `.env.example`), `~/.jam` contents or logs. Never put the owner key in a URL you paste anywhere.
 - **`worker.js` is generated.** Edit `worker.src.js`, `ui.html`, `budget.mjs`, `worker-lib.mjs` or `inline-modules.txt`, run `./build.sh`, commit the regenerated `worker.js`. CI fails on a stale bundle.
 - **Spawns stay in `bridge.mjs`.** Every `spawn()` needs an `.on("error")` on the same variable in the same function, and both `ws.onmessage` handlers must wrap their whole body in one `try { } catch`. The helper modules must not import `child_process`. `check.sh` enforces all three.
@@ -80,11 +92,14 @@ the browser UI, and anything that needs a real `claude` login. Say so in the PR 
 | `worker.src.js`, `worker-lib.mjs`, `ui.html` | the Worker (Hub and Room DOs), its pure helpers, the single-file UI |
 | `docs/PROTOCOL.md` | the wire protocol; update it in the same PR as any message change |
 | `check.sh`, `build.sh`, `inline-modules.txt` | the gate, the bundler, the list of inlined modules |
+| `jam-url.mjs` | http/ws for a loopback host, https/wss otherwise (`JAM_SCHEME` overrides). Clients never hard-code a scheme (`check.sh` enforces it). `approve-hook.mjs` inlines its own copy on purpose. |
+| `scripts/stack.mjs`, `scripts/dev.mjs`, `scripts/e2e.mjs` | the local stack, `npm run dev`, and the end-to-end orchestrator |
+| `dev/fake-claude.mjs`, `dev/fake-claude-rules.mjs` | the deterministic fake `claude`: protocol and files, and the pure rules table (add a rule there when a test needs a new answer) |
 
 ## Making a change
 
 1. Branch from `main`; one focused change per PR.
-2. Write or extend a test first when behaviour changes. Prefer the pure modules: a bug in turn handling is a case in `turn-policy.test.mjs`, a protocol bug in `test-worker-hub.mjs`, a whole-bridge behaviour in `test-bridge-turn.mjs`.
+2. Write or extend a test first when behaviour changes. Prefer the pure modules: a bug in turn handling is a case in `turn-policy.test.mjs`, a protocol bug in `test-worker-hub.mjs`, a whole-bridge behaviour in `test-bridge-turn.mjs`, anything that crosses the Worker's websockets or the browser in `test-stack.mjs` or one of the live test files (they now run locally).
 3. Match the surrounding style: dense lines, comments that explain *why* and cite the dated incident that motivated a guard. Keep existing regression comments.
-4. `npm test`, then the Markdown lint if you touched docs.
+4. `npm run verify` (or at least `npm test`), then the Markdown lint if you touched docs. CI runs `check`, `lint` and `e2e`.
 5. Open a PR using the template. PRs are squash-merged and need the maintainer's approval; do not merge, and do not use `--admin`, unless the maintainer told you to.

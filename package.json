@@ -12,7 +12,11 @@
     "start": "./run.sh",
     "dev": "node scripts/dev.mjs",
     "test": "./check.sh",
-    "test:stack": "node test-stack.mjs"
+    "test:stack": "node test-stack.mjs",
+    "e2e": "node scripts/e2e.mjs",
+    "e2e:real": "node scripts/e2e.mjs --real",
+    "verify": "npm test && npm run test:stack && npm run e2e",
+    "setup:e2e": "playwright install chromium"
   },
   "license": "MIT",
   "engines": {
