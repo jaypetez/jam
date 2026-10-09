@@ -1,0 +1,72 @@
+;; Seatbelt profile for the Bash tool of NON-OWNER (driver) turns. Claude Code runs each Bash command through
+;; sandbox/bashwrap.sh (CLAUDE_CODE_SHELL_PREFIX), which applies this profile to the command only. `claude` itself is NOT wrapped:
+;; it needs the keychain and its own config to work, and the file tools it runs in-process are gated by approve-hook.mjs.
+;; Kernel-enforced, so it holds where regex classification can't (quote-splitting, globs, interpreters).
+;; Params (-D): HOME CWD SCRATCH UID — all realpaths. A more specific operation beats order in Seatbelt; within the same
+;; operation later rules win, so broad allows come first and specific denies last.
+;; KNOWN RESIDUAL: Seatbelt can't stop a same-uid process reading another process's environment via sysctl KERN_PROCARGS2, so no
+;; long-lived process may hold the hub key in its env (run.sh, bridge.mjs and sandbox.mjs arrange that; see test-sandbox-exec.mjs).
+(version 1)
+(allow default)
+
+;; ── writes: only the room's own directory and this turn's scratch ────────────────────────────────────────────
+(deny file-write*)
+(allow file-write*
+  (subpath (param "CWD"))
+  (subpath (param "SCRATCH"))
+  (regex #"^/private/var/folders/[^/]+/[^/]+/C/(clang|org\.llvm\.clang)")   ; the C toolchain's module cache (not other apps' caches)
+  (regex #"^/private/var/folders/[^/]+/[^/]+/T/xcrun_db")           ; the git/cc shims' cache; TMPDIR itself is the scratch dir (bashwrap.sh)
+  (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper") (regex #"^/dev/fd/[0-9]+$")
+  (regex #"^/private/tmp/claude-[0-9a-f]+-cwd$"))                   ; claude's per-command cwd bookkeeping
+;; …but the room is also where the OWNER's later runs happen: a driver must not plant things claude or git will load with owner
+;; rights (project settings/hooks/env, MCP servers, CLAUDE.md, git config/hooks, direnv, editor tasks)
+(deny file-write*
+  (regex (string-append "^" (param "CWD") "/(.*/)?(\\.git|\\.vscode|\\.husky|\\.claude[^/]*)(/.*)?$"))   ; at ANY depth: a nested repo's .git/config
+                                                                                                       ; (core.fsmonitor) runs when the owner runs git there
+  (regex (string-append "^" (param "CWD") "/(.*/)?(CLAUDE[^/]*\\.md|\\.mcp\\.json|\\.envrc|\\.gitmodules|\\.gitattributes)$")))
+
+;; ── reads: nothing in $HOME except the room and known toolchains ─────────────────────────────────────────────
+;; (data only: stat still works so path traversal and existence checks behave normally)
+;; Nor other users' homes, mounted volumes, /tmp (other rooms, other turns, world-readable leftovers) or the owner's TMPDIR. System
+;; dirs (/usr, /bin, /System, /Library, /opt, /etc) stay readable: nothing runs without them.
+(deny file-read-data (subpath "/Users") (subpath "/Volumes") (subpath "/private/tmp") (regex #"^/private/var/folders/[^/]+/[^/]+/T(/|$)"))
+(allow file-read-data (regex #"^/private/var/folders/[^/]+/[^/]+/T/xcrun_db"))
+(deny file-read-data (subpath (param "HOME")))
+(allow file-read-data
+  (subpath (param "CWD")) (subpath (param "SCRATCH"))
+  (subpath (string-append (param "HOME") "/.local")) (subpath (string-append (param "HOME") "/.nvm"))
+  (subpath (string-append (param "HOME") "/.volta")) (subpath (string-append (param "HOME") "/.cargo"))
+  (subpath (string-append (param "HOME") "/.rustup")) (subpath (string-append (param "HOME") "/.pyenv"))
+  (subpath (string-append (param "HOME") "/.bun")) (subpath (string-append (param "HOME") "/.deno"))
+  (subpath (string-append (param "HOME") "/.npm"))
+  (literal (string-append (param "HOME") "/.gitconfig")) (subpath (string-append (param "HOME") "/.config/git"))
+  (subpath (string-append (param "HOME") "/.claude/shell-snapshots"))                    ; the shell sources its snapshot every command
+  (subpath (string-append (param "HOME") "/Library/Caches")))                            ; compilers and package managers keep tool caches here
+;; secrets that can sit inside the room or those allowed dirs
+(deny file-read-data
+  (regex #"/\.env($|\.)") (regex #"/\.dev\.vars($|\.)") (regex #"/\.jam-key$") (regex #"/\.(zsh|bash)_history$")
+  (regex #"/\.(npmrc|netrc|pypirc)$") (regex #"/\.git-credentials$") (regex #"/id_(rsa|ed25519|ecdsa)$")
+  (subpath (string-append (param "HOME") "/.local/share/gh")) (subpath (string-append (param "HOME") "/.config/git/credentials")))
+;; ...but not Claude Code's own per-project caches (MCP connector logs of every project ever opened) or other drivers' scratch dirs
+(deny file-read-data (regex (string-append "^" (param "HOME") "/Library/Caches/(claude|com\\.anthropic)[^/]*")) (regex #"^/private/tmp/jam-driver-"))
+(allow file-read-data (subpath (param "SCRATCH")))
+;; claude's own background-task output (other sessions' transcripts of tool output) lives here
+(deny file-read-data (subpath (string-append "/private/tmp/claude-" (param "UID"))))
+
+;; ── ways out of the sandbox and around it ────────────────────────────────────────────────────────────────────
+;; Signals only reach this command's own processes: no killing the bridge, claude, the owner's apps or other rooms' turns. (Each Bash
+;; call is its own sandbox, so a later call can't kill an earlier call's server either: use the Bash tool's run_in_background, which
+;; claude itself stops. Whatever is left when the turn ends is reaped by the bridge: sandbox.mjs reapDriver.)
+(deny signal)
+(allow signal (target same-sandbox))
+(deny process-exec
+  (literal "/bin/launchctl") (literal "/usr/bin/osascript") (literal "/usr/bin/open") (literal "/usr/bin/crontab")
+  (literal "/usr/bin/sudo") (literal "/usr/bin/at") (literal "/usr/bin/su"))
+(deny network-outbound (remote ip "localhost:*"))
+;; IPC services that hand out owner data with no file access: keychain (Claude's own OAuth token!), pasteboard, Launch Services
+(deny mach-lookup
+  (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd") (global-name "com.apple.securityd.xpc")
+  (global-name "com.apple.security.agentd") (global-name "com.apple.security.authhost")
+  (global-name "com.apple.pboard") (global-name "com.apple.pasteboard.1")
+  (global-name "com.apple.CoreServices.coreservicesd") (global-name "com.apple.coreservices.launchservicesd")
+  (global-name "com.apple.lsd.mapdb") (global-name "com.apple.lsd.open"))

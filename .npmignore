@@ -1,0 +1,15 @@
+logs/
+.wrangler/
+docs/
+*.test.mjs
+test-*.mjs
+test.mjs
+run-tests.sh
+check.sh
+bridge.log
+nohup.out
+.jam-key
+.env
+.dev.vars
+.github/
+This is test. This is only a test./

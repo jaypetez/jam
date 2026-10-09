@@ -1,0 +1,21 @@
+{
+  "name": "@nullagency/jam",
+  "version": "0.2.1",
+  "description": "Shared multi-user Claude Code sessions: rooms, roles, approvals, short invite links.",
+  "type": "module",
+  "bin": {
+    "jam-bridge": "bridge.mjs"
+  },
+  "scripts": {
+    "build": "./build.sh",
+    "deploy": "./deploy.sh",
+    "start": "./run.sh"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "playwright": "^1.47.0"
+  }
+}

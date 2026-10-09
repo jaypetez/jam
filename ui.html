@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark"><meta name="theme-color" content="#0b0d12">
+<title>jam</title>
+<style>
+:root{--tind:38px;--bg:#0b0d12;--panel:#12151c;--panel2:#171b24;--line:#222735;--line2:#2c3344;--fg:#e7e9ef;--dim:#8a92a6;--dim2:#5d6578;--me:#7c9cf5;--ai:#86d68a;--sec:#4fd6c8;--warn:#f0b860;--err:#f27a8a;--ok:#5fd3a1;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;--r:12px;--side:272px}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--me)}button{font:inherit}
+.app{display:flex;height:100%;height:100dvh}
+/* ── sidebar ── */
+aside{width:var(--side);flex:none;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;overflow-y:auto}
+.brand{display:flex;align-items:center;gap:10px;padding:16px 18px 12px}
+.brand .logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--me),#b78cf7);display:grid;place-items:center;font-weight:800;color:#0b0d12;font-size:14px}
+.brand b{font-size:16px;letter-spacing:.01em}.brand .room.edit{cursor:pointer}.brand .room.edit:hover{color:var(--fg)}.brand .room{color:var(--dim);font-family:var(--mono);font-size:15px;font-weight:700;text-decoration:underline;margin-left:auto;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+section{padding:10px 18px;border-top:1px solid var(--line)}
+section h4{margin:0 0 8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--sec);font-weight:600;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+section h4::after{content:"▾";margin-left:auto;color:var(--sec);opacity:.75;font-size:18px;line-height:1;letter-spacing:0}section h4:hover::after{opacity:1}
+section.fold h4{margin:0}section.fold h4::after{content:"▸"}section.fold>:not(h4){display:none}
+.foldall{width:18px;height:18px;flex:none;padding:0;display:grid;place-items:center;background:none;border:1px solid var(--line2);border-radius:4px;color:var(--sec);font-size:14px;line-height:1;cursor:pointer}.foldall:hover{border-color:var(--sec)}
+section h4 .cnt{color:var(--dim);font-weight:500;letter-spacing:0;text-transform:none}section h4 .cnt:not(:empty)::before{content:"["}section h4 .cnt:not(:empty)::after{content:"]"}
+.pills{display:flex;flex-wrap:wrap;gap:6px}
+.pill{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--line2);color:var(--dim);white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.on{color:var(--ok)}.pill.off{color:var(--err)}.pill.run{color:var(--warn)}.pill.run::before{animation:pulse 1s infinite}
+.pill.q::before{display:none}
+.work{font-family:var(--mono);font-size:12px;letter-spacing:.06em;background:linear-gradient(90deg,#4a5266 0%,#4a5266 30%,#ffffff 50%,#4a5266 70%,#4a5266 100%);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:sweep 1.6s ease-in-out infinite alternate}
+@keyframes sweep{from{background-position:100% 0}to{background-position:0% 0}}
+.pill.run{border-color:#3a3f4d}.pill.run::before{display:none}
+@keyframes pulse{50%{opacity:.2}}
+.person{display:flex;align-items:center;gap:10px;padding:5px 0}
+.av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;color:#0b0d12;flex:none}
+/* everyone in People is connected right now (the panel is presence-only), so every name reads as online: green + bold. You stay teal so you can still find yourself. */
+.person .nm{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--ok);text-shadow:0 0 8px #5fd3a159}.person .nm.me{color:var(--me);text-shadow:0 0 8px #7c9cf559}
+.badge{font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid var(--line2);color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-left:auto;flex:none}
+.badge.owner{color:var(--warn);border-color:#4a3f2a}.badge.viewer{color:var(--dim2)}
+.person .kick{background:none;border:none;color:var(--err);cursor:pointer;font-size:16px;font-weight:bold;line-height:1;padding:2px 4px;margin-left:4px;flex:none}.person .kick:hover{color:#ff4444}
+.dots i{display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--dim);margin-left:2px;animation:blink 1s steps(2) infinite}.dots i:nth-child(2){animation-delay:.33s}.dots i:nth-child(3){animation-delay:.66s}
+@keyframes blink{50%{opacity:.15}}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:3px 9px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--fg);cursor:pointer}.chip:hover{border-color:var(--me)}
+.chip .id{font-family:var(--mono);color:var(--me)}
+.sbtn{width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--line2);border-radius:9px;padding:8px 10px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px}.sbtn:hover{border-color:var(--me)}
+.inv{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px}.inv .badge{margin-left:0}.inv .t{font-family:var(--mono);color:var(--dim);font-size:12px;cursor:pointer}.inv .t:hover{color:var(--fg)}.inv .cp{margin-left:auto;background:none;border:1px solid var(--line2);border-radius:5px;color:var(--dim);cursor:pointer;font-size:10px;padding:1px 6px;flex:none}.inv .cp:hover{border-color:var(--me);color:var(--fg)}.inv .x{background:none;border:0;color:var(--dim2);cursor:pointer;font-size:14px;padding:2px 4px;flex:none}.inv .x:hover{color:var(--err)}
+.meBar{margin-top:auto;padding:12px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;font-size:13px;color:var(--dim)}
+.meBar button{background:none;border:0;color:var(--dim2);cursor:pointer;margin-left:auto;font-size:12px}.meBar button:hover{color:var(--fg)}
+/* ── main ── */
+.mainCol{flex:1;display:flex;flex-direction:column;min-width:0}
+header.top{display:none;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+header.top .menu{background:none;border:1px solid var(--line2);color:var(--fg);border-radius:8px;width:36px;height:36px;cursor:pointer}
+header.top b{font-size:15px}header.top .room{color:var(--dim);font-family:var(--mono);font-size:13px}
+main{flex:1;overflow-y:auto;scrollbar-gutter:stable both-edges;padding:20px 20px 8px;overflow-anchor:none}
+.wrap{max-width:clamp(940px,82%,1500px);margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.msg{display:flex;gap:12px;align-items:flex-start}
+.msg .av{margin-top:2px}
+.msg .c{min-width:0;flex:1}
+.meta{font-size:12px;color:var(--dim);display:flex;gap:8px;align-items:baseline;margin-bottom:3px}.meta .n{font-weight:600;color:var(--fg)}
+.say .body{background:var(--panel);border:1px solid var(--line);padding:10px 14px;border-radius:var(--r);white-space:pre-wrap;word-wrap:break-word}
+.ai .av{background:linear-gradient(135deg,var(--ai),#5fd3a1)}
+.ai .body{word-wrap:break-word;padding:2px 0}
+.body p{margin:.35em 0}.body pre{background:#07090d;border:1px solid var(--line);padding:10px 12px;border-radius:8px;overflow-x:auto;font:13px/1.45 var(--mono)}
+.body code{font-family:var(--mono);font-size:13px;background:#07090d;padding:1px 5px;border-radius:4px;border:1px solid var(--line)}.body pre code{background:none;padding:0;border:0}
+.body ul,.body ol{margin:.3em 0;padding-left:1.4em}.body h3{font-size:15px;margin:.8em 0 .2em}.body hr{border:0;border-top:1px solid var(--line);margin:.6em 0}
+.cursor::after{content:"▍";color:var(--ai);animation:blink 1s steps(2) infinite}
+.tool{margin-left:38px;border:1px solid var(--line);border-radius:9px;background:var(--panel);font-size:13px;overflow:hidden}
+.tool .hd{display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;color:var(--dim);font-family:var(--mono);font-size:12px}
+.tool .hd:hover{background:var(--panel2)}.tool .hd b{color:var(--fg);font-weight:600;font-family:var(--sans);font-size:12px}.tool .hd .s{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.tool .ic{width:18px;height:18px;border-radius:5px;display:grid;place-items:center;font-size:11px;background:var(--panel2);color:var(--me);flex:none}
+.tool .st{flex:none;font-size:11px}.tool .st.err{color:var(--err)}.tool .st.ok{color:var(--ok)}
+.tool .bd{display:none;border-top:1px solid var(--line);padding:8px 10px;font:12px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word;max-height:360px;overflow:auto;background:#07090d}
+.tool.open .bd{display:block}.tool .bd .lbl{color:var(--dim2);font-family:var(--sans);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:6px 0 3px}.tool .bd .lbl:first-child{margin-top:0}
+.tgrp{margin-left:38px;border:1px solid var(--line);border-radius:11px;background:linear-gradient(180deg,rgba(124,156,245,.05),rgba(124,156,245,0) 60%),var(--panel);overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 1px 3px rgba(0,0,0,.3)}
+.tgrp>.gh{display:flex;align-items:center;gap:10px;padding:9px 12px 8px;cursor:pointer;user-select:none}
+.tgrp>.gh:hover{background:rgba(255,255,255,.02)}
+.tgrp .gic{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;flex:none;font-size:12px;color:var(--me);background:var(--well);box-shadow:var(--wellsh)}
+.tgrp .gm{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.tgrp .gt{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--fg)}.tgrp .gt>b{font-weight:600}
+.tgrp .chip{font:11px var(--mono);color:var(--dim);padding:1px 7px;border-radius:99px;border:1px solid var(--line2);background:rgba(255,255,255,.02)}.tgrp .chip i{font-style:normal;color:var(--fg);margin-left:4px}
+.tgrp .now{font:11.5px var(--mono);color:var(--dim2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tgrp .now b{color:var(--dim);font-weight:500}
+.tgrp .bar{height:3px;border-radius:3px;background:var(--line);overflow:hidden}.tgrp .bar>span{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--me),var(--ok));box-shadow:0 0 8px rgba(95,211,161,.5);transition:width .35s ease}
+.tgrp .gs{flex:none;font-size:11.5px;color:var(--dim);display:flex;align-items:center;gap:6px}.tgrp .gs.ok{color:var(--ok);text-shadow:0 0 6px rgba(95,211,161,.45)}.tgrp .gs.err{color:var(--err)}
+.tgrp .gs .sp{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--line2);border-top-color:var(--me);animation:spin .8s linear infinite}
+.tgrp .cv{flex:none;color:var(--dim2);font-size:14px;transition:transform .2s}.tgrp.open .cv{transform:rotate(90deg)}
+.tgrp>.gb{display:none;flex-direction:column;gap:6px;padding:4px 10px 10px;border-top:1px solid var(--line)}.tgrp.open>.gb{display:flex}.tgrp>.gb>.tool{margin-left:0}.tgrp>.gb>.tool:first-child{margin-top:6px}
+.tgrp.few>.gh{display:none}.tgrp.few>.gb{display:flex;border-top:0;padding:0}.tgrp.few{margin-left:38px;border:0;background:none;box-shadow:none;overflow:visible}.tgrp.few>.gb>.tool:first-child{margin-top:0}
+.tool .bd .del{color:#f7a1ab;background:#2a1418;display:block}.tool .bd .add{color:#a6e3a1;background:#12261a;display:block}
+.sys{text-align:center;color:var(--dim2);font-size:12px}
+.err .body{border:1px solid #4a2a33;color:var(--err);background:#1d1218;border-radius:var(--r);padding:10px 14px;white-space:pre-wrap}
+.appr{margin-left:38px;border:1px solid #4a3f2a;background:#1a1610;border-radius:var(--r);padding:10px 14px}
+.appr .t{font-size:13px;color:var(--warn);font-weight:600;display:flex;gap:8px;align-items:center}.appr pre{margin:6px 0;font:12px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word;color:var(--fg);max-height:200px;overflow:auto}
+.appr .acts{display:flex;gap:8px;margin-top:6px}.appr .acts button{border-radius:8px;padding:6px 14px;border:1px solid var(--line2);background:var(--panel2);color:var(--fg);cursor:pointer}.appr .acts .ok{background:var(--ok);color:#0b0d12;border-color:transparent;font-weight:600}.appr .acts .no{color:var(--err)}
+.appr.done{opacity:.75;border-color:var(--line)}.appr.done.allowed .t{color:var(--ok)}.appr.done.denied .t{color:var(--err)}
+#pendingBar{margin:0 0 0 var(--tind)}
+/* host login: sits above the composer like an approval, owner-only. Nothing else can fix an expired login, so it stays put until it's done. */
+#authBar{margin:0 0 8px var(--tind)}#authBar:empty{display:none}
+#authBar .ab{border:1px solid #2f3a5c;background:#111524;border-radius:var(--r);padding:10px 14px;background-image:var(--raise)}
+#authBar .t{font-size:13px;color:var(--me);font-weight:600;display:flex;gap:8px;align-items:center}
+#authBar .t::before{content:"●";font-size:9px;color:var(--me);text-shadow:0 0 8px var(--me)}
+#authBar .d{font-size:12.5px;color:var(--dim);margin-top:4px;overflow-wrap:anywhere}#authBar .d a{word-break:break-all}
+#authBar .acts{display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap}
+#authBar .acts button{border-radius:8px;padding:6px 14px;border:0;background:var(--me);color:#0b0d12;font-weight:600;cursor:pointer}
+#authBar .acts button.sec{background:var(--panel2);color:var(--fg);border:1px solid var(--line2);font-weight:400}
+.signinLink{background:none;border:0;padding:0;color:var(--me);font:inherit;cursor:pointer;text-decoration:underline dotted var(--dim2);text-underline-offset:3px}.signinLink:hover{text-shadow:0 0 8px var(--me)}
+#authBar input{flex:1;min-width:140px;background:var(--bg);color:var(--fg);border:1px solid var(--line2);border-radius:8px;padding:6px 10px;font:inherit;outline:none}#authBar input:focus{border-color:var(--me)}
+.act{margin:0 0 8px var(--tind);display:none;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;border:1px solid var(--line2);background:var(--panel2);font-size:13px}
+.act.show{display:flex}.act .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none;animation:pulse 1.2s infinite}
+.act .work{font-size:13px}.act .el{font-family:var(--mono);color:var(--dim);flex:none}.act .lt{font-family:var(--mono);color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.act.dead{border-color:#4a2a33;background:#1d1218;color:var(--err)}.act.dead .dot{background:var(--err);animation:none}
+.act.stall{border-color:#4a3f2a;background:#1a1610;color:var(--warn)}.act.stall .dot{background:var(--warn)}
+.act.recon{color:var(--dim)}.act.recon .dot{background:var(--dim)}
+.topAct{margin:10px 14px 0;max-width:none}
+.batt{display:inline-flex;align-items:center;gap:6px;color:var(--dim);font-family:var(--mono);font-size:11px}
+.batt.warn{color:var(--warn)}
+.batt.hot{color:var(--err);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.meta .c${color:var(--dim2);font-family:var(--mono);font-size:11px}
+.roomlink{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px;color:var(--fg);text-decoration:none}.roomlink.cur{color:var(--me)}.roomlink .h{font-family:var(--mono);color:var(--dim2);font-size:12px}
+.roomlink.unread{font-weight:700}[draggable]{cursor:grab}[draggable].drag-over{background:var(--panel2);border-radius:4px}
+.ucnt{flex:none;background:var(--me);color:var(--bg);font-size:10px;font-weight:700;border-radius:999px;padding:0 6px;min-width:16px;height:16px;line-height:16px;text-align:center}
+.roomlink .ucnt{margin-left:auto}
+.online-badge{flex:none;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--sec);font-weight:600}
+.online-badge::before{content:"● ";font-size:9px}
+.roomCard.unread .nm .rlink{font-weight:800;color:var(--me);text-decoration-color:var(--me)}
+select.sel{width:100%;min-width:200px;background:var(--bg);color:var(--fg);border:1px solid var(--line2);border-radius:9px;padding:7px 10px;font:inherit;font-size:13px;margin-top:6px}
+.mrow{display:block;margin-top:10px;font-size:12px;color:var(--dim)}.mrow .sel{margin-top:4px}
+.queue{margin:0 0 6px var(--tind);display:none;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--dim)}.queue.show{display:flex}
+.queue .qi{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);border-radius:999px;padding:2px 8px 2px 10px;background:var(--panel2);max-width:320px}.queue .qi .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.queue .qi b{color:var(--fg);font-weight:600}
+.queue .qi button{background:none;border:0;color:var(--dim2);cursor:pointer;padding:0 2px;font-size:13px}.queue .qi button:hover{color:var(--err)}
+.more{align-self:center;background:var(--panel2);color:var(--dim);border:1px solid var(--line2);border-radius:999px;padding:5px 14px;font-size:12px;cursor:pointer}.more:hover{color:var(--fg)}
+.cwrap{max-width:clamp(940px,82%,1500px);margin:0 auto}
+footer.comp{border-top:1px solid var(--line);background:var(--panel);padding:8px 20px calc(10px + env(safe-area-inset-bottom))}
+.typing{margin:0 0 4px var(--tind);min-height:18px;font-size:12px;color:var(--dim);font-style:italic}
+.row{margin:0 0 0 var(--tind);display:flex;flex-direction:column;align-items:stretch;gap:6px;position:relative}
+textarea{flex:1;min-width:0;resize:none;min-height:46px;max-height:220px;background:var(--bg);color:var(--fg);border:1px solid var(--line2);border-radius:11px;padding:11px 13px;font:inherit;outline:none}textarea:focus{border-color:var(--me)}textarea:disabled{opacity:.5}
+.hint{margin:6px 0 0 var(--tind);font-size:12px;color:var(--dim2);display:flex;gap:14px;align-items:center}.hint .sess{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}.hint .sess:empty,.hint>span:empty{display:none}
+.hint .hbtns{display:flex;gap:6px;flex:none;margin-left:auto}.hint .hbtns button{background:var(--me);color:#0b0d12;border:0;border-radius:8px;padding:0 14px;height:26px;min-width:76px;font-size:12px;font-weight:600;cursor:pointer}.hint .hbtns button.stop{background:transparent;color:var(--err);border:1px solid #4a2a33}.hint .hbtns button:disabled{opacity:.35;cursor:default}
+.attach{margin:0 0 6px var(--tind);display:none;gap:8px;flex-wrap:wrap}.attach.show{display:flex}
+.att{position:relative;border:1px solid var(--line2);border-radius:9px;background:var(--bg);padding:4px;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);max-width:220px}
+.att img{width:56px;height:56px;object-fit:cover;border-radius:6px;display:block}.att .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:18px}
+.att .x{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--fg);font-size:11px;cursor:pointer;display:grid;place-items:center;padding:0}
+.workslot{display:flex;align-items:center;height:18px;padding:0;margin-left:5px;flex:none}.workslot:empty{display:none}.workslot .work{font-size:13px}
+.hnav{align-self:center;margin-left:6px;display:none;flex-direction:column;gap:2px}.hnav.show{display:flex}
+.hnav button{width:22px;height:18px;padding:0;border-radius:5px;border:1px solid var(--line2);background:var(--panel2);color:var(--dim);font-size:10px;line-height:1;cursor:pointer}.hnav button:hover{color:var(--fg)}.hnav button:disabled{opacity:.3;cursor:default}
+.row .tawrap{flex:1;position:relative;display:flex}.row .tawrap textarea{width:100%}.row .tawrap:has(button.clip) textarea{padding-left:42px}
+.row button.clip{position:absolute;left:5px;bottom:5px;height:34px;background:transparent;color:var(--dim);border:0;padding:0 8px;font-size:16px;border-radius:8px;cursor:pointer}.row button.clip:hover{background:var(--panel2)}.row button.clip:hover{color:var(--fg)}
+.row.drop textarea{border-color:var(--me);box-shadow:0 0 0 3px #7c9cf533}
+.msg .atts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}.msg .atts img{max-width:260px;max-height:200px;border-radius:8px;border:1px solid var(--line);display:block}.msg .atts .f{font-size:12px;color:var(--dim);border:1px solid var(--line);border-radius:7px;padding:4px 8px;font-family:var(--mono)}
+#ac{position:absolute;bottom:calc(100% + 6px);left:0;background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:4px;display:none;min-width:240px;box-shadow:0 10px 30px #0008;z-index:5}
+#ac div{padding:6px 10px;border-radius:7px;cursor:pointer;font-size:13px;display:flex;gap:8px;align-items:center}#ac div.sel,#ac div:hover{background:var(--panel)}#ac .id{font-family:var(--mono);color:var(--me)}#ac .d{color:var(--dim);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* ── overlays ── */
+.ov{position:fixed;inset:0;background:#0b0d12e6;display:flex;align-items:center;justify-content:center;z-index:9;padding:20px}
+.card{background:var(--panel);border:1px solid var(--line2);padding:24px;border-radius:16px;width:min(420px,100%);display:flex;flex-direction:column;gap:12px;box-shadow:0 20px 60px #000a}
+.card h2{margin:0;font-size:18px}.card p{margin:0;color:var(--dim);font-size:13px}
+.card input,.card select{background:var(--bg);color:var(--fg);border:1px solid var(--line2);border-radius:9px;padding:10px 12px;font:inherit;width:100%}
+.card .btn{background:var(--me);color:#0b0d12;border:0;border-radius:9px;padding:10px 14px;font-weight:600;cursor:pointer}.card .btn.sec{background:var(--panel2);color:var(--fg);border:1px solid var(--line2)}
+.card .link{display:flex;gap:8px;align-items:center;background:var(--bg);border:1px solid var(--line2);border-radius:9px;padding:8px 10px;font-family:var(--mono);font-size:13px}.card .link span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .link button{background:var(--panel2);color:var(--fg);border:1px solid var(--line2);border-radius:7px;padding:4px 10px;cursor:pointer;font-size:12px}
+.card .rowi{display:flex;gap:8px}
+/* ── lobby ── */
+#lobby{max-width:760px;margin:0 auto;padding:40px 20px}
+#lobby .brand{padding:0 0 24px}
+.rooms{display:grid;gap:10px}
+.rlink{color:var(--fg);text-decoration:underline;text-decoration-color:var(--dim2);text-underline-offset:3px}.rlink:hover{color:var(--me);text-decoration-color:var(--me)}
+.roomCard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:14px}
+.roomCard .nm{font-weight:600;font-size:15px}.roomCard .cwd{font-family:var(--mono);color:var(--dim);font-size:12px}.roomCard .md{color:var(--dim2);font-size:12px}
+.roomCard .acts{margin-left:auto;display:flex;gap:6px}.roomCard .acts button,.roomCard .acts a{background:var(--panel2);color:var(--fg);border:1px solid var(--line2);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;text-decoration:none}
+.roomCard .acts .del{color:var(--err)}
+.roomLeave{background:none;color:var(--err);border:1px solid var(--line2);border-radius:3px;width:15px;height:15px;padding:0;font-size:12px;font-weight:700;line-height:1;cursor:pointer;flex:none;display:inline-flex;align-items:center;justify-content:center}.roomLeave:hover{border-color:var(--err)}
+.new{margin-top:24px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+.new h3{margin:0 0 10px;font-size:14px}.new form{display:grid;grid-template-columns:1fr 2fr 1fr auto auto;gap:8px}
+.new button.cx{background:transparent;color:var(--dim);border:1px solid var(--line2);font-weight:500}.new button.cx:hover{color:var(--fg);border-color:var(--dim)}
+.newBtn{margin-top:24px;width:100%;text-align:left;background:var(--panel);color:var(--fg);border:1px dashed var(--line2);border-radius:14px;padding:13px 16px;font:inherit;font-weight:600;cursor:pointer}.newBtn:hover{border-color:var(--me);color:var(--me)}
+.new input,.new select{background:var(--bg);color:var(--fg);border:1px solid var(--line2);border-radius:9px;padding:9px 11px;font:inherit;min-width:0}.new button{background:var(--me);color:#0b0d12;border:0;border-radius:9px;padding:0 14px;font-weight:600;cursor:pointer}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line2);padding:8px 14px;border-radius:10px;font-size:13px;z-index:20;box-shadow:0 10px 30px #0008}
+.mSearch{display:none}
+@media(max-width:860px){:root{--tind:0px}.hint .hbtns button{height:44px;min-width:64px}aside{position:fixed;inset:0 auto 0 0;z-index:8;transform:translateX(-100%);transition:transform .2s;box-shadow:0 0 40px #000a}aside.open{transform:none}header.top{display:flex}.tool,.appr,.tgrp{margin-left:0}main{padding:14px 12px 6px}footer.comp{padding-left:12px;padding-right:12px}.new form{grid-template-columns:1fr}#scrim{position:fixed;inset:0;background:#0007;z-index:7;display:none}#scrim.open{display:block}.mSearch{display:block}}@media(max-width:480px){.roomCard{align-items:flex-start;gap:8px}.roomCard .nm{flex-grow:1}.roomCard .acts{margin-left:0;margin-top:6px;width:100%;justify-content:flex-end;flex-wrap:wrap}}
+.schedBadge{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:5px;background:var(--panel2);color:var(--dim);border:1px solid var(--line2);font-family:var(--mono);position:relative}.schedBadge:hover::after{content:attr(data-tip);position:absolute;bottom:100%;left:0;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:10px;white-space:nowrap;margin-bottom:4px;z-index:10}
+/* ── right context pane ── */
+.ctx{width:296px;flex:none;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden}
+.resizer{width:5px;flex:none;cursor:col-resize;background:transparent;touch-action:none}
+.resizer:hover,.resizer.active{background:var(--me)}
+.tstat{display:flex;gap:6px;flex-wrap:wrap}
+.mtr .msub.txt{display:block}.tctl{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.runlocal{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:var(--dim2);cursor:pointer}.runlocal input{accent-color:#7c5cff;margin:0}.tprice{display:block;white-space:normal;margin-top:7px;line-height:1.5;font-size:11px;color:var(--dim2);font-family:var(--mono)}
+.tctl label{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--dim2);font-family:var(--mono);min-width:0}
+.tctl select.sel{margin-top:0;min-width:0;width:100%;font-size:12px;padding:6px 8px;border-radius:7px}.tctl select.sel:disabled{opacity:.55;cursor:default}
+.meters{display:flex;flex-direction:column;gap:14px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.mtr .msub{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:11px;color:var(--dim2);font-family:var(--mono);min-height:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mtr .msub .sp{flex:1}
+.tcost{display:flex;align-items:baseline;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-family:var(--mono)}
+.tcost .k{font-size:11px;color:var(--dim2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tcost b{font-weight:600;font-size:14px;color:var(--fg);flex:none;margin-left:auto}
+.meterHead{display:flex;align-items:baseline;gap:8px}
+.meterHead .k{color:var(--dim2);font-family:var(--mono);font-size:11px}
+.meterHead .batt{margin-left:auto;font-size:12px;font-variant-numeric:tabular-nums}
+/* battery: recessed glass tube, 10 cells, lit charge with a bright front edge, terminal nub; colour follows what's left */
+.meter{--c:var(--ok);position:relative;height:8px;margin:5px 4px 0 0;border-radius:3px;background:linear-gradient(180deg,#06080c,#131722);box-shadow:inset 0 1px 2px rgba(0,0,0,.8),0 0 0 1px #1d2231,0 1px 0 1px rgba(255,255,255,.025)}
+.meter.warn{--c:var(--warn)}.meter.hot{--c:var(--err)}
+.meter::before{content:"";position:absolute;inset:0;border-radius:3px;z-index:2;pointer-events:none;background:repeating-linear-gradient(90deg,transparent 0 calc(10% - 1.5px),rgba(6,8,12,.92) calc(10% - 1.5px) 10%),linear-gradient(180deg,rgba(255,255,255,.1),rgba(255,255,255,0) 50%)}
+.meter::after{content:"";position:absolute;right:-4px;top:2px;width:2px;height:4px;border-radius:0 1.5px 1.5px 0;background:#2c3344;transition:background .4s,box-shadow .4s}
+.meter.full::after{background:var(--c);box-shadow:0 0 5px var(--c)}
+.meter .fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:3px;overflow:hidden;background-color:var(--c);background-image:linear-gradient(180deg,rgba(255,255,255,.5) 0,rgba(255,255,255,.14) 38%,rgba(255,255,255,0) 55%,rgba(0,0,0,.3) 100%);box-shadow:0 0 6px -1px var(--c),0 0 16px -5px var(--c);transition:width .7s cubic-bezier(.2,.8,.2,1),background-color .4s,box-shadow .4s}
+.meter .fill::before{content:"";position:absolute;top:0;right:0;bottom:0;width:2px;background:rgba(255,255,255,.85);box-shadow:0 0 6px 1px var(--c)}
+.meter .fill::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.4) 50%,transparent 65%);transform:translateX(-100%);animation:mshine 6s ease-in-out infinite}
+.meters .mtr:nth-child(2) .fill::after{animation-delay:.35s}.meters .mtr:nth-child(3) .fill::after{animation-delay:.7s}
+.meter.hot .fill{animation:mhot 1.6s ease-in-out infinite}
+@keyframes mshine{0%,70%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+@keyframes mhot{50%{box-shadow:0 0 9px 0 var(--c),0 0 22px -3px var(--c)}}
+@media(prefers-reduced-motion:reduce){.meter .fill,.meter .fill::after{animation:none}.meter .fill::after{display:none}}
+.chip.run{border-color:var(--ok);color:var(--ok)}
+.rdot{width:6px;height:6px;border-radius:50%;background:var(--ok);animation:pulse 1.2s infinite;flex:none}
+.ctx .appr{margin:0;padding:9px 11px}.ctx .appr pre{font-size:11.5px}
+.empty{font-size:12px;color:var(--dim2);font-style:italic;padding:2px 0}
+.sub2{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px}
+.sub2 .dot{width:7px;height:7px;border-radius:50%;background:var(--dim2);flex:none}
+.sub2 .dot.on{background:var(--ok);animation:pulse 1.2s infinite}
+.sub2 .nm{font-family:var(--mono);font-size:12.5px;color:var(--dim)}
+.sub2 .nm.on{color:var(--fg)}
+.sub2 .what{margin-left:auto;font-size:11px;color:var(--dim2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px}
+.sub2 .what.on{color:var(--ok)}
+.touch{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px;font-family:var(--mono)}
+.touch .ic{width:16px;height:16px;border-radius:4px;display:grid;place-items:center;font-size:10px;background:var(--panel2);color:var(--me);flex:none}
+.touch .f{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.touch .d{color:var(--dim2);flex:none;font-size:11px}.touch .d.ok{color:var(--ok)}.touch .d.err{color:var(--err)}
+.sched2{display:flex;gap:8px;align-items:center;padding:4px 0;font-size:12px;color:var(--dim)}
+.sched2 .m{font-family:var(--mono);color:var(--sec)}
+.ctx .queue{margin:0;flex-direction:column;align-items:stretch}.ctx .queue .qi{max-width:100%;min-width:0}.ctx .queue .qi .t{flex:1;min-width:0}
+.ctx.hide{display:none}.ctx.hide+.resizer,.resizer.hide{display:none}
+section.hot h4,section.hot h4::after{color:var(--warn)}
+.touch{cursor:pointer;border-radius:6px;margin:0 -6px;padding:3px 6px}.touch:hover{background:var(--panel2)}.touch:hover .f{color:var(--fg)}
+.sub2.link{cursor:pointer;border-radius:6px;margin:0 -6px;padding:4px 6px}.sub2.link:hover{background:var(--panel2)}
+@media(max-width:860px){.ctx,.resizer,.ctxTog{display:none}}
+/* ── polish: motion, focus, scrollbars, shortcuts ── */
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.wrap>.msg,.wrap>.tool,.wrap>.tgrp,.wrap>.appr,.wrap>.sys,.ctx .appr,.touch,.sub2,.queue .qi{animation:rise .22s ease-out both}
+@keyframes spin{to{transform:rotate(360deg)}}
+.tool .st:empty::after{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;border:1.5px solid var(--line2);border-top-color:var(--me);animation:spin .8s linear infinite;vertical-align:-1px}
+@keyframes flash{0%{box-shadow:0 0 0 2px var(--me)}100%{box-shadow:0 0 0 2px transparent}}
+.flash{animation:flash 1.4s ease-out}
+textarea:focus{box-shadow:0 0 0 3px #7c9cf522}
+.roomlink,.touch,.sub2,.pill,.sbtn,.chip,.resizer,.tool .hd{transition:background .15s,color .15s,border-color .15s}
+aside,.ctx,main,.tool .bd,.appr pre{scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+aside::-webkit-scrollbar,.ctx::-webkit-scrollbar,main::-webkit-scrollbar,.tool .bd::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}::-webkit-scrollbar-track{background:transparent}
+.logbox{flex:1;display:flex;flex-direction:column;min-height:0;position:relative}.logbox>main{flex:1}
+.sponsor{display:none;margin-top:auto;padding:12px 14px 14px;border-top:1px solid var(--line);font-size:11px;color:var(--dim2);text-align:center;flex:none;overflow-wrap:anywhere}.sponsor.show{display:block}.sponsor a{color:var(--dim2);text-decoration:none}.sponsor a:hover{color:var(--sec)}
+.ctx .sponsor{position:sticky;bottom:0;z-index:1;background:var(--panel)}aside .sponsor{display:none!important}aside .sponsor.show+.meBar{margin-top:0}
+.sponsor.na a{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:6px 9px;padding:10px 12px 12px;border:1px solid rgba(0,255,180,.28);border-radius:10px;background:linear-gradient(135deg,#0f1923,#0b0d12 70%);box-shadow:0 0 0 1px rgba(0,255,180,.04),0 6px 24px -10px rgba(0,255,180,.35);color:inherit;transition:border-color .2s,box-shadow .2s}
+.sponsor.na a:hover{border-color:rgba(0,255,180,.6);box-shadow:0 0 0 1px rgba(0,255,180,.12),0 8px 30px -8px rgba(0,255,180,.55)}
+.sponsor.na .by{flex-basis:100%;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim2)}
+.sponsor.na svg{width:24px;height:24px;flex:none;overflow:visible;animation:naGlow 2.8s ease-in-out infinite}
+.sponsor.na .wm{font-family:var(--mono);font-size:11.5px;font-weight:700;letter-spacing:.16em;color:#e7fff7;white-space:nowrap}
+.sponsor.na .wm i{font-style:normal;color:#00FFB4;text-shadow:0 0 8px rgba(0,255,180,.7)}
+.sponsor.na .wm u{text-decoration:none;color:#00FFB4;animation:naBlink 1.1s steps(1) infinite}
+@keyframes naGlow{0%,100%{filter:drop-shadow(0 0 1px rgba(0,255,180,.5))}50%{filter:drop-shadow(0 0 5px rgba(0,255,180,.95))}}
+@keyframes naBlink{50%{opacity:0}}
+@media(prefers-reduced-motion:reduce){.sponsor.na svg,.sponsor.na .wm u{animation:none}}
+@media(max-width:860px){aside .sponsor.show{display:block!important}}
+.jump{position:absolute;left:50%;bottom:14px;transform:translate(-50%,10px);opacity:0;pointer-events:none;transition:.18s;background:var(--me);color:#0b0d12;font-weight:600;font-size:12px;padding:6px 14px;border-radius:999px;box-shadow:0 8px 24px #0008;cursor:pointer;border:0;z-index:3}
+.jump.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.ctxDock{width:0;flex:none;position:relative;z-index:3}.ctxTog{position:absolute;top:6px;right:-1px;width:20px;height:28px;border-radius:8px 0 0 8px;border:1px solid var(--line2);border-right:0;background:var(--panel);color:var(--sec);cursor:pointer;font-size:14px;z-index:3;display:grid;place-items:center;line-height:1}.ctxTog:hover{color:var(--sec);border-color:var(--sec)}.ctxTog.off{right:0}
+.kbd{display:inline-flex;align-items:center;gap:5px;color:var(--dim2);flex:none;font-size:11.5px}
+.kbd b{font-family:var(--mono);font-size:10.5px;color:var(--dim);background:var(--panel2);border:1px solid var(--line2);border-radius:5px;padding:0 5px;line-height:16px;box-shadow:0 1.5px 0 var(--line2);font-weight:500}
+.kbd .sep{color:var(--line2);margin:0 1px}.kbd a{color:var(--dim2);text-decoration:none;cursor:pointer}.kbd a:hover{color:var(--sec)}
+.appr .acts .hk{margin-left:4px;font-size:11px;color:var(--dim2);align-self:center}
+.sc{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;color:var(--dim);padding:5px 0;border-top:1px solid var(--line)}.sc:first-of-type{border-top:0}.sc .kbd{gap:4px}
+.emptyRoom{margin:auto;text-align:center;color:var(--dim2);font-size:13px;padding:60px 0 20px}.emptyRoom b{display:block;color:var(--dim);font-size:15px;margin-bottom:4px;font-weight:600}
+@media(max-width:860px){.kbd,.appr .acts .hk,.ctxTog{display:none}#authBar .acts button{height:44px;padding:0 16px}#authBar input{height:44px}}
+/* ── glass & glow: the battery-meter language carried across the page. Visual only: shadows, gradients, pseudo-elements; no box sizes change ── */
+:root{--well:linear-gradient(180deg,#06080c,#11141c);--wellsh:inset 0 1px 2px rgba(0,0,0,.75),0 1px 0 rgba(255,255,255,.03);--gloss:linear-gradient(180deg,rgba(255,255,255,.42) 0,rgba(255,255,255,.12) 42%,rgba(255,255,255,0) 55%,rgba(0,0,0,.2) 100%)}
+/* recessed wells: composer, pickers, search, dialog fields */
+textarea,select.sel,.card input,.card select,.new input,.new select{background:var(--well);box-shadow:var(--wellsh);transition:border-color .2s,box-shadow .25s}
+#searchInput,#searchInputM{background:var(--well)!important;box-shadow:var(--wellsh);transition:border-color .2s,box-shadow .25s}
+textarea:focus,select.sel:focus,.card input:focus,.new input:focus,#searchInput:focus,#searchInputM:focus{outline:none;border-color:var(--me)!important;box-shadow:var(--wellsh),0 0 0 1px #7c9cf555,0 0 18px -6px var(--me)}
+/* lit keys: Send, Allow, dialog + lobby primaries, jump, unread count */
+.hint .hbtns button:not(.stop),.appr .acts .ok,.card .btn:not(.sec),.new button:not(.cx),.jump,.ucnt{background-image:var(--gloss);box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 12px -4px var(--me),0 1px 2px rgba(0,0,0,.5);transition:box-shadow .2s,filter .2s}
+.jump{box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 14px -4px var(--me),0 8px 24px #0008}
+.appr .acts .ok{box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 12px -4px var(--ok),0 1px 2px rgba(0,0,0,.5)}
+.hint .hbtns button:not(.stop):not(:disabled):hover,.appr .acts .ok:hover,.card .btn:not(.sec):hover,.new button:not(.cx):hover{filter:brightness(1.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 0 18px -3px var(--me),0 1px 2px rgba(0,0,0,.5)}
+.appr .acts .ok:hover{box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 0 18px -3px var(--ok),0 1px 2px rgba(0,0,0,.5)}
+.hint .hbtns button:disabled{box-shadow:none;filter:none}
+.hint .hbtns button.stop{background:var(--well);box-shadow:var(--wellsh);transition:box-shadow .2s,text-shadow .2s}.hint .hbtns button.stop:not(:disabled):hover{text-shadow:0 0 8px var(--err);box-shadow:var(--wellsh),0 0 12px -5px var(--err)}
+/* raised glass: secondary buttons, chips, invite rows */
+.sbtn,.more,.roomCard .acts button,.roomCard .acts a,.card .btn.sec,.chip{background-image:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,0) 60%);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 1px 2px rgba(0,0,0,.35);transition:border-color .2s,box-shadow .25s}
+.sbtn:hover,.chip:hover,.more:hover{box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 14px -6px var(--me)}
+/* LEDs: status pills, activity dot, online badge */
+.pill{background:var(--well);box-shadow:var(--wellsh)}
+.pill::before{background:radial-gradient(circle at 35% 30%,#fff 0,currentColor 55%);box-shadow:0 0 6px 0 currentColor}
+.act .dot{background-image:radial-gradient(circle at 35% 30%,rgba(255,255,255,.9) 0,rgba(255,255,255,0) 60%);box-shadow:0 0 8px 0 var(--ok)}
+.act.dead .dot{box-shadow:0 0 8px 0 var(--err)}.act.stall .dot{box-shadow:0 0 8px 0 var(--warn)}.act.recon .dot{box-shadow:none}
+.online-badge{text-shadow:0 0 8px var(--sec)}
+/* activity bar: a recessed tube with a charge line tracing its floor while a turn runs */
+.act{position:relative;overflow:hidden;background:var(--well);box-shadow:var(--wellsh)}
+.act.show::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,var(--ok) 45%,#fff 50%,var(--ok) 55%,transparent);background-size:40% 100%;background-repeat:no-repeat;animation:charge 2.4s cubic-bezier(.45,0,.55,1) infinite;opacity:.8}
+.act.dead::after,.act.recon::after{display:none}.act.stall::after{filter:hue-rotate(-100deg)}
+@keyframes charge{from{background-position:-70% 0}to{background-position:170% 0}}
+/* avatars + logo: glossy spheres */
+.av,.brand .logo{position:relative;box-shadow:0 1px 3px rgba(0,0,0,.45)}
+.av::after,.brand .logo::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:radial-gradient(circle at 32% 24%,rgba(255,255,255,.5),rgba(255,255,255,0) 46%);box-shadow:inset 0 -2px 3px rgba(0,0,0,.22),inset 0 1px 1px rgba(255,255,255,.3)}
+.brand .logo{box-shadow:0 1px 3px rgba(0,0,0,.45),0 0 16px -5px var(--me)}
+/* badges and tool cards: faint glass, lit status text */
+.badge,.tool .ic,.kbd b{background:var(--well);box-shadow:var(--wellsh)}
+.badge.owner{text-shadow:0 0 7px rgba(240,184,96,.45)}
+.tool,.say .body{box-shadow:inset 0 1px 0 rgba(255,255,255,.03),0 1px 2px rgba(0,0,0,.25)}
+.tool .st.ok{text-shadow:0 0 6px rgba(95,211,161,.55)}.tool .st.err{text-shadow:0 0 6px rgba(242,122,138,.55)}
+.tcost b{text-shadow:0 0 10px rgba(231,233,239,.18)}
+@media(prefers-reduced-motion:reduce){.act.show::after{animation:none;display:none}}
+/* glass & glow, second sweep: the small controls and floating surfaces the first pass missed */
+:root{--raise:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,0) 65%);--raisesh:inset 0 1px 0 rgba(255,255,255,.06),0 1px 2px rgba(0,0,0,.4)}
+/* mini keys: leave-room, fold-all, copy link, compact, pane toggle, history arrows, mobile menu, dialog copy, Deny, attachment remove */
+.roomLeave,.foldall,.inv .cp,.jamMini,.ctxTog,.hnav button,header.top .menu,.card .link button,.appr .acts button:not(.ok),.att .x{background-image:var(--raise);box-shadow:var(--raisesh);transition:border-color .2s,box-shadow .25s,color .2s,text-shadow .2s}
+.foldall:hover,.ctxTog:hover{box-shadow:var(--raisesh),0 0 10px -3px var(--sec)}
+.inv .cp:hover,.jamMini:hover,.hnav button:not(:disabled):hover,header.top .menu:hover,.card .link button:hover{border-color:var(--me)!important;color:var(--fg)!important;box-shadow:var(--raisesh),0 0 10px -3px var(--me)}
+.roomLeave:hover,.appr .acts .no:hover,.att .x:hover{border-color:var(--err);box-shadow:var(--raisesh),0 0 10px -3px var(--err);text-shadow:0 0 6px var(--err)}
+.hnav button:disabled{box-shadow:none}
+.row button.clip:hover{background:var(--well);box-shadow:var(--wellsh);text-shadow:0 0 8px var(--me)}
+.inv .x:hover{color:var(--err);text-shadow:0 0 6px var(--err)}
+/* wells: invite link field, attachments, code, scheduled tag */
+.card .link,.att,.schedBadge{background:var(--well);box-shadow:var(--wellsh)}
+.body pre{background:var(--well);box-shadow:var(--wellsh)}.body code{box-shadow:inset 0 1px 1px rgba(0,0,0,.6)}.body pre code{box-shadow:none}
+/* raised glass chips + a lit chip for a running subagent */
+.queue .qi{background-image:var(--raise);box-shadow:var(--raisesh)}
+.chip.run{box-shadow:var(--raisesh),0 0 12px -4px var(--ok);text-shadow:0 0 6px rgba(95,211,161,.5)}
+/* floating glass: @-mention popup and toasts */
+#ac,.toast{background-image:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,0) 40%);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 10px 30px #0008}
+#ac div.sel,#ac div:hover{background:var(--well);box-shadow:var(--wellsh)}
+.newBtn{transition:border-color .2s,color .2s,box-shadow .25s}.newBtn:hover{box-shadow:0 0 18px -8px var(--me)}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* per-driver budget screen (owner, from an invite name) + the driver's own budget pill — glass & glow */
+.inv .invName{background:none;border:0;padding:0;color:var(--fg);font:inherit;cursor:pointer;text-decoration:underline dotted var(--dim2);text-underline-offset:3px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inv .invName:hover{color:var(--sec);text-decoration-color:var(--sec)}
+.inv .bst{font-family:var(--mono);font-size:10px;color:var(--dim);flex:none}.inv .bst.low,.inv .bst.downshift{color:var(--warn)}.inv .bst.blocked,.inv .bst.paused{color:var(--err)}
+.budget-ov{position:fixed;inset:0;z-index:9;background:var(--bg);overflow-y:auto;display:flex;justify-content:center;padding:28px 20px 48px}
+.bud{width:min(640px,100%);display:flex;flex-direction:column;gap:14px;height:max-content}
+.budTop{display:flex;align-items:center;gap:14px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.budTitle{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}.budTitle b{font-size:18px}.budTitle .badge{margin-left:0}
+.bud .k{color:var(--dim2);font-family:var(--mono);font-size:11px}
+.budBack{font-size:12px;padding:6px 11px;border:1px solid var(--line2);border-radius:8px;background-color:var(--panel);color:var(--fg);cursor:pointer;flex:none}
+.budSec{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:10px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+.budH{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--sec);font-weight:600;display:flex;align-items:center;gap:8px}
+.budRow{display:flex;align-items:baseline;gap:8px}.budVal{margin-left:auto;font-family:var(--mono);font-size:22px;color:var(--fg);text-shadow:0 0 14px rgba(79,214,200,.35)}
+.budRange{width:100%;accent-color:var(--sec);margin:2px 0}
+.chip.on{border-color:var(--sec);color:var(--sec);box-shadow:0 0 10px -3px var(--sec)}
+.budHelp{margin:0;font-size:12px;color:var(--dim);line-height:1.5}
+.budToggle{display:flex;align-items:center;gap:10px;font-size:13px;padding:13px 18px;background:var(--panel);border:1px solid var(--line);border-radius:14px;cursor:pointer}.budToggle.off{opacity:.45;cursor:default}.budToggle input{accent-color:var(--sec)}
+.budMeters{margin-top:0;padding-top:0;border-top:0}.budMeters .mtr .msub{white-space:normal;overflow:visible}
+.bpill{font-size:10px;letter-spacing:.03em;text-transform:none;font-weight:500;padding:1px 8px;border-radius:999px;border:1px solid var(--line2);color:var(--dim)}
+.bpill.ok{color:var(--ok);border-color:rgba(95,211,161,.4)}.bpill.warn{color:var(--warn);border-color:currentColor}.bpill.hot{color:var(--err);border-color:currentColor}
+.budTurn{display:grid;grid-template-columns:auto auto 1fr auto;gap:12px;align-items:baseline;padding:7px 0;border-top:1px solid var(--line);font-size:12px}
+.budTurn:first-child{border-top:0}.budTurn .m{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.budTurn b{font-family:var(--mono);font-weight:500}
+.budFoot{display:flex;gap:10px}.budFoot .sbtn{flex:1;padding:10px}.budFoot .danger{color:var(--err)}.budFoot .danger:hover{border-color:var(--err)}
+.budPill{font-family:var(--mono);font-size:11px;color:var(--dim);white-space:nowrap}.budPill.warn{color:var(--warn)}.budPill.hot{color:var(--err)}
+.live{position:absolute;right:16px;bottom:14px;z-index:4;width:min(380px,calc(100% - 32px));background:var(--panel);border:1px solid var(--line2);border-radius:12px;overflow:hidden;box-shadow:0 18px 50px #000b,0 0 0 1px rgba(79,214,200,.08),0 0 26px -8px rgba(79,214,200,.4);transition:width .25s}
+.live.big{width:min(900px,calc(100% - 32px))}
+.lvHead{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 11px;font-size:11px;border-bottom:1px solid var(--line);background-image:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,0))}
+.lvHead b{font-family:var(--mono);letter-spacing:.1em;color:var(--err);font-size:10px}.lvHead .k{color:var(--dim2);font-family:var(--mono)}
+.lvDot{width:7px;height:7px;border-radius:50%;background:var(--err);box-shadow:0 0 8px var(--err);animation:pulse 1.4s ease-in-out infinite;flex:none}
+.live.ended .lvDot{background:var(--ok);box-shadow:0 0 6px var(--ok);animation:none}.live.ended .lvHead b{color:var(--ok)}
+.lvLbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim);font-family:var(--mono)}
+.lvBtn{margin:0;padding:1px 7px;font-size:12px;line-height:18px;border-radius:6px;background:transparent;color:var(--dim);border:1px solid var(--line2);flex:none}.lvBtn:hover{color:var(--fg);border-color:var(--sec)}
+.live img{display:block;width:100%;aspect-ratio:16/10;object-fit:contain;background:#06080c}
+.lvUrl{display:block;padding:4px 11px 6px;font-size:10px;font-family:var(--mono);color:var(--dim2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:14px}
+@media(max-width:860px){.live{right:8px;bottom:8px;width:min(300px,calc(100% - 16px))}.live.big{width:calc(100% - 16px)}}
+@media(max-width:860px){.budget-ov{padding:16px 12px 40px}.budTurn{grid-template-columns:auto 1fr auto}.budTurn .m{display:none}}
+</style></head><body>
+<div id="scrim"></div>
+<div id="root"></div>
+<script>
+(function(){
+const $=(s,r=document)=>r.querySelector(s);const h=(t,a={},...k)=>{const e=document.createElement(t);for(const[x,y]of Object.entries(a)){if(x==="class")e.className=y;else if(x.startsWith("on"))e.addEventListener(x.slice(2),y);else if(x==="html")e.innerHTML=y;else e.setAttribute(x,y)}for(const c of k.flat())if(c!=null)e.append(c.nodeType?c:document.createTextNode(c));return e};
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const colors=["#7c9cf5","#b78cf7","#7dcfff","#ff9e64","#f27a8a","#f0b860","#5fd3a1","#e0c3fc"];
+const claudeColor="#86d68a"; // fixed color for Claude across all sessions
+const userColors={}; // name -> color, sent by bridge
+const col=n=>{if(n==="Claude")return claudeColor;if(userColors[n])return userColors[n];let x=0;for(const c of String(n||""))x=(x*31+c.charCodeAt(0))>>>0;return colors[x%colors.length]};
+const av=(n,bg)=>h("span",{class:"av",style:"background:"+(bg||col(n))},String(n||"?").trim()[0]?.toUpperCase()||"?");
+const ts=t=>new Date(t||Date.now()).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
+const toast=(m,ms=1800)=>{const t=h("div",{class:"toast"},m);document.body.append(t);setTimeout(()=>t.remove(),ms)};
+const copy=async t=>{try{await navigator.clipboard.writeText(t);toast("Copied")}catch{prompt("Copy:",t)}};
+// unread tracking for the room list: per-room "seen up to message N", device-local UI state (like jam.fold), not user data.
+// getSeen returns null for "never opened on this device" (vs. 0, a real seen-everything state) so unreadOf can seed
+// instead of flooding a 99+ badge for a room's entire pre-existing history the first time it shows up in this list.
+const seenKey=r=>"jam.seen."+r;
+const getSeen=r=>{try{const v=localStorage.getItem(seenKey(r));return v===null?null:+v||0}catch{return null}};
+const setSeen=(r,seq)=>{if(!r||!(seq>=0))return;try{const cur=getSeen(r);if(cur===null||seq>cur)localStorage.setItem(seenKey(r),String(seq))}catch{}};
+function unreadOf(r){
+  const last=r.lastSeq||0,seen=getSeen(r.name);
+  if(seen===null){setSeen(r.name,last);return 0} // first sight of this room on this device — seed, don't flood a 99+ for its whole history
+  // r.lastSeq is Hub-side in-memory state (never durably saved — see Room.bumpActivity), so it reads back as 0
+  // any time the Hub DO evicts and reloads, even though the room's own message counter is untouched and higher.
+  // Never force the local watermark down for that: it would read as "caught up" for a beat, then the very next
+  // message would jump lastSeq back to its true (much higher) value and flash a false 99+. A deleted+recreated
+  // room with the same name hits this same branch and just stays quiet until its new counter climbs back past
+  // the old watermark — a stale silence, not a wrong number.
+  return last<=seen?0:last-seen;
+}
+// Linkifies already-escaped text: markdown [label](url) links and bare https? URLs, without ever nesting an <a> inside
+// another. Splitting on the markdown-link pattern first (instead of two independent .replace() passes) keeps the two
+// forms from seeing each other's output — a bare-URL pass run after a markdown-link pass would otherwise re-linkify a
+// URL sitting inside an already-built <a>'s label (e.g. `[ https://a](https://b)`), producing a nested anchor.
+const linkifyInto=t=>{const parts=t.split(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g);let out="";
+  for(let i=0;i<parts.length;){out+=parts[i].replace(/(^|\s)(https?:\/\/[^\s<]+)/g,'$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');i++;
+    if(i<parts.length){out+='<a href="'+parts[i+1]+'" target="_blank" rel="noopener noreferrer">'+parts[i]+'</a>';i+=2}}
+  return out};
+// Link-only rendering for human-typed chat (say) and error text: escape + linkify, no block markdown. Chat is where
+// people paste diffs/code/asterisked shell output — running the full md() parser on it turns leading "-"/"*" into
+// list bullets and mangles bold/italic markers that were never meant as markdown, corrupting the paste.
+const linkOnly=s=>linkifyInto(esc(String(s??""))).replace(/\n/g,"<br>");
+function md(s){const out=[];const parts=String(s).split(/```/);
+  for(let i=0;i<parts.length;i++){if(i%2){const nl=parts[i].indexOf("\n");const first=nl>=0?parts[i].slice(0,nl):"";const isLang=nl>=0&&/^[a-z0-9+#-]{0,15}$/i.test(first);const body=isLang?parts[i].slice(nl+1):parts[i];out.push("<pre><code>"+esc(body.replace(/\n$/,""))+"</code></pre>");continue}
+    const lines=parts[i].split("\n");let buf=[],list=null;const flush=()=>{if(buf.length){out.push("<p>"+buf.join("<br>")+"</p>");buf=[]}};const endList=()=>{if(list){out.push("</"+list+">");list=null}};
+    const inline=t=>linkifyInto(esc(t).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g,"$1<i>$2</i>"));
+    for(const ln of lines){const hd=/^(#{1,3})\s+(.*)/.exec(ln);const ul=/^\s*[-*]\s+(.*)/.exec(ln);const ol=/^\s*\d+[.)]\s+(.*)/.exec(ln);
+      if(/^\s*(-{3,}|\*{3,})\s*$/.test(ln)){flush();endList();out.push("<hr>")}
+      else if(hd){flush();endList();out.push("<h3>"+inline(hd[2])+"</h3>")}
+      else if(ul){flush();if(list!=="ul"){endList();out.push("<ul>");list="ul"}out.push("<li>"+inline(ul[1])+"</li>")}
+      else if(ol){flush();if(list!=="ol"){endList();out.push("<ol>");list="ol"}out.push("<li>"+inline(ol[1])+"</li>")}
+      else if(!ln.trim()){flush();endList()}
+      else{endList();buf.push(inline(ln))}}
+    flush();endList()}
+  return out.join("")}
+
+/* ── identity from URL ── */
+const BUILD="__BUILD__";
+const qs=new URLSearchParams(location.search);
+const cookie=n=>(document.cookie.match(new RegExp("(?:^|; )"+n+"=([^;]*)"))||[])[1]||"";
+let key=qs.get("k")||"";let room=(location.pathname.startsWith("/r/")?decodeURIComponent(location.pathname.slice(3)):"")||qs.get("room")||"";
+if(location.pathname.startsWith("/j/")){key=location.pathname.slice(3).replace(/\/.*$/,"")}
+if(key){document.cookie="jam_k="+encodeURIComponent(key)+"; Path=/; Max-Age=31536000; SameSite=Lax"+(location.protocol==="https:"?"; Secure":"");
+  if(location.search||location.pathname.startsWith("/j/"))history.replaceState(null,"",room?"/r/"+encodeURIComponent(room):(location.pathname.startsWith("/j/")?location.pathname:"/"))}
+else key=decodeURIComponent(cookie("jam_k"));
+const signOut=()=>{document.cookie="jam_k=; Path=/; Max-Age=0";location.href="/"};
+const root=$("#root");
+if(!key){root.append(h("div",{class:"ov"},h("div",{class:"card"},h("h2",{},"jam"),h("p",{},"Shared Claude Code sessions. You need an invite link to join a room, or the owner key to manage rooms."),h("form",{onsubmit:e=>{e.preventDefault();const k=$("#kIn").value.trim();if(k)location.href="/?k="+encodeURIComponent(k)}},h("input",{id:"kIn",placeholder:"Owner key",autofocus:""}),h("button",{class:"btn",style:"margin-top:8px;width:100%"},"Open lobby")))));return}
+
+fetch("/api/whoami?k="+encodeURIComponent(key)+(room?"&room="+encodeURIComponent(room):"")).then(r=>r.json()).then(me=>{
+  if(!me.ok){root.append(h("div",{class:"ov"},h("div",{class:"card"},h("h2",{},"Link not valid"),h("p",{},"This invite was revoked or never existed. Ask the room owner for a new one."),h("button",{class:"btn sec",onclick:signOut},"Forget this key"))));return}
+  if(!me.room){lobby(me);return}
+  room=me.room.name;if(location.pathname.startsWith("/j/"))history.replaceState(null,"","/r/"+encodeURIComponent(room));
+  let name=me.name||"";try{if(!name)name=localStorage.getItem("jam.name")||""}catch{}
+  if(name){start(me,name);return}
+  const ov=h("div",{class:"ov"},h("div",{class:"card"},h("h2",{},"Join #"+room),h("p",{},me.role==="viewer"?"You've been invited to watch this session. What should we call you?":"Shared Claude Code session. What should Claude call you?"),h("form",{onsubmit:e=>{e.preventDefault();const v=$("#nmIn").value.trim();if(!v)return;try{localStorage.setItem("jam.name",v)}catch{}ov.remove();start(me,v)}},h("input",{id:"nmIn",placeholder:"Your name",maxlength:"32",autofocus:""}),h("button",{class:"btn",style:"margin-top:8px;width:100%"},"Join"))));
+  root.append(ov)}).catch(()=>root.append(h("div",{class:"ov"},h("div",{class:"card"},h("h2",{},"Can't reach jam"),h("p",{},"Check your connection and reload.")))));
+
+/* ── lobby (owner) ── */
+/* live model catalog (bridge → Models API + Anthropic pricing page, re-read on every page load): picker options, effort
+   levels, context windows, and prices all come from here, so new models and price changes need no jam release */
+const FAM_ORDER=["fable","mythos","opus","sonnet","haiku"];
+const HARD_MODELS=[["claude-fable-5-1","Fable 5.1"],["claude-opus-5","Opus 5"],["claude-sonnet-5","Sonnet 5"],["claude-haiku-4-5-20251001","Haiku 4.5"]]; // before the first catalog arrives
+const catModel=(cat,id)=>cat&&cat.models?cat.models.find(m=>m.id===id)||null:null;
+// current models, newest per family, strongest first; keeps a pinned-but-older model so the select never lies about the room
+const famIdx=f=>{const i=FAM_ORDER.indexOf(f);return i<0?FAM_ORDER.length:i};
+function catList(cat,keep){const L=cat&&cat.models&&cat.models.length?cat.models.filter(m=>m.current||m.id===keep).sort((a,b)=>famIdx(a.family)-famIdx(b.family)):HARD_MODELS.map(([id,label])=>({id,label}));if(keep&&keep!=="auto"&&!L.some(m=>m.id===keep))L.push({id:keep,label:keep.replace(/^claude-/,"")});return L}
+const usd=n=>"$"+(n<1?(+n).toFixed(2):String(+(+n).toFixed(2)));
+const priceTxt=m=>m&&m.price?m.label+" "+usd(m.price.in)+"/"+usd(m.price.out):m?m.label+" (price n/a)":"";
+const winTxt=n=>n>=1e6?(n/1e6).toFixed(n%1e6?1:0)+"M":Math.round(n/1e3)+"k";
+function lobby(me){
+  const list=h("div",{class:"rooms"});const st=h("span",{class:"pill"},"bridge …");
+  const origin=location.origin;
+  let userClosed=false;
+  let lobbyCat=null;const drawRm=()=>{const sel=$("#rm");if(!sel)return;const v=sel.value||"auto";sel.replaceChildren(h("option",{value:"auto"},"Auto — route by complexity"),...catList(lobbyCat).map(m=>h("option",{value:m.id},"Always "+m.label+(m.window?" ("+winTxt(m.window)+")":"")+(m.price?" · "+usd(m.price.in)+"/"+usd(m.price.out)+" per MTok":""))));sel.value=[...sel.options].some(o=>o.value===v)?v:"auto"};
+  const draw=(rooms,bridge,cat)=>{if(cat){lobbyCat=cat;try{drawRm()}catch(err){console.warn("catalog",err)}}list.innerHTML="";st.textContent=bridge?"bridge online":"bridge offline";st.className="pill "+(bridge?"on":"off");
+    try{const live=new Set(rooms.map(r=>r.name));for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);if(k&&k.startsWith("jam.seen.")&&!live.has(k.slice(9)))localStorage.removeItem(k)}}catch{} // a stale key from a deleted room would otherwise poison a same-named room recreated later
+    if(!rooms.length&&!userClosed)showNew(true);
+    if(!rooms.length)list.append(h("div",{class:"sys"},"No rooms yet. ",h("a",{href:"#",onclick:e=>{e.preventDefault();showNew(true)}},"Create one"),"."));
+    for(const r of rooms){const unread=unreadOf(r);list.append(h("div",{class:"roomCard"+(unread?" unread":"")},av(r.name),h("div",{},h("div",{class:"nm",style:"display:flex;align-items:center;gap:6px"},h("button",{class:"roomLeave",title:"Leave this room",onclick:()=>{if(confirm("Leave #"+r.name+"?"))location.href="/"}},"−"),h("a",{class:"rlink",href:"/r/"+encodeURIComponent(r.name),title:"Open #"+r.name},"#"+r.name),unread?h("span",{class:"ucnt"},unread>99?"99+":String(unread)):null,r.online?h("span",{class:"online-badge",title:(r.onlineNames||[]).join(", ")},String(r.online)+" online"):null),h("div",{class:"cwd"},r.cwd),h("div",{class:"md"},!r.model||r.model==="auto"?"auto-route":"pinned to "+r.model.replace("claude-",""))),
+      h("div",{class:"acts"},h("a",{href:"/r/"+encodeURIComponent(r.name)},"Open"),h("button",{onclick:()=>copy(origin+"/r/"+encodeURIComponent(r.name)+"?k="+key)},"Copy owner link"),h("button",{onclick:async()=>{const to=prompt("New room name (a-z 0-9 - _):",r.name);if(!to||to===r.name)return;const cwd=prompt("Working directory on the host:",r.cwd);if(!cwd)return;const x=await fetch("/api/rooms/"+encodeURIComponent(r.name)+"/rename?k="+encodeURIComponent(key),{method:"POST",body:JSON.stringify({to,cwd})}).then(r=>r.json());toast(x.ok?"Renamed to #"+x.room.name:(x.error||"failed"));load()}},"Rename"),h("button",{class:"del",onclick:async()=>{if(!confirm("Delete #"+r.name+"? Invites are revoked; the transcript stays until the room is reused."))return;await fetch("/api/rooms/"+encodeURIComponent(r.name)+"?k="+encodeURIComponent(key),{method:"DELETE"});load()}},"Delete"))))}};
+  const load=()=>fetch("/api/rooms?k="+encodeURIComponent(key)).then(r=>r.json()).then(d=>{if(d.ok===false){st.textContent="lobby error";st.className="pill off";list.innerHTML="";list.append(h("div",{class:"sys"},d.error||"Could not load rooms."));return}draw(d.rooms||[],d.bridge,d.catalog)}).catch(()=>{st.textContent="offline";st.className="pill off"});
+  const form=h("form",{onkeydown:e=>{if(e.key==="Escape"&&e.target.id!=="rm")showNew(false)},onsubmit:async e=>{e.preventDefault();const b={name:$("#rn").value,cwd:$("#rc").value,model:$("#rm").value};const r=await fetch("/api/rooms?k="+encodeURIComponent(key),{method:"POST",body:JSON.stringify(b)}).then(r=>r.json());if(!r.ok){toast(r.error||"failed");return}showNew(false);toast("Room #"+r.room.name+" ready");load()}},
+    h("input",{id:"rn",placeholder:"room name (unique, like a subreddit)",required:"",pattern:"[A-Za-z0-9_\\-]+",maxlength:"40",title:"letters, digits, - and _ only; lowercased"}),h("input",{id:"rc",placeholder:"working directory on the host, e.g. /Users/you/code/app",required:""}),
+    h("select",{id:"rm"}),h("button",{},"Create"),h("button",{type:"button",class:"cx",title:"Discard and close (Esc)",onclick:()=>showNew(false)},"Cancel"));
+  // New room stays folded behind a button; Cancel/Esc clears the fields and folds it back.
+  const nw=h("div",{class:"new",style:"display:none"},h("h3",{},"New room"),form);
+  const nb=h("button",{class:"newBtn",onclick:()=>showNew(true)},"+ New room");
+  function showNew(o){nw.style.display=o?"":"none";nb.style.display=o?"none":"";if(o){$("#rn").focus()}else{userClosed=true;form.reset();nb.focus()}}
+  root.append(h("div",{id:"lobby"},h("div",{class:"brand"},h("span",{class:"logo"},"j"),h("b",{},"jam"),h("span",{style:"margin-left:auto"},st)),
+    h("p",{style:"color:var(--dim);margin:0 0 16px;font-size:13px"},"Each room is one Claude Code session in one directory on the host. Open a room to chat and mint invite links."),list,nb,nw));
+  drawRm();
+  if(location.hash==="#new"){showNew(true);history.replaceState(null,"","/")}
+  load();
+  // live updates via the hub socket
+  const ws=new WebSocket((location.protocol==="https:"?"wss":"ws")+"://"+location.host+"/hub?k="+encodeURIComponent(key));
+  ws.onmessage=ev=>{const e=JSON.parse(ev.data);if(e.type==="rooms")draw(e.rooms,e.bridge);else if(e.type==="catalog"){lobbyCat=e;try{drawRm()}catch(err){console.warn("catalog",err)}}else if(e.type==="room.change"||e.type==="bridge")load()};
+  // Was gated on BUILD!=="__BUILD__", but build.sh's sed rewrites *every* occurrence of that literal — including
+  // this comparison itself — so after any real build it read as <hash>!=="<hash>", permanently false. The self-
+  // update path never fired in production since e3b033b. The server already sends build:null when unbuilt
+  // (worker.src.js), so d.build's truthiness alone is the correct signal; no client-side sentinel needed.
+  setInterval(()=>fetch("/health").then(r=>r.json()).then(d=>{if(d.build&&d.build!==BUILD)location.reload()}).catch(()=>{}),30000);
+}
+
+/* ── room ── */
+function start(me,name){
+  const role=me.role;const canDrive=role!=="viewer";const isOwner=role==="owner";
+  let ws=null,retry=0,agents=[],people=[],schedules=[];const live={};const tools={};const typers={};let pending={};
+  const origin=location.origin;
+  /* layout */
+  const logWrap=h("div",{class:"wrap"});const logEl=h("main",{},logWrap);let target=null;
+  const pendingBar=h("div",{id:"pendingBar"});const authBar=h("div",{id:"authBar"});const actBar=h("div",{class:"act"});const topAct=h("div",{class:"act topAct"});
+  let roomCost=0; // lifetime total from the Room DO (every turn ever) — the only number the cost line shows
+  let agentRuns={};
+  const CTX_EXPLAIN="Tokens = how full Claude's memory of this session is. Compact to reset it.";
+  const PLAN_EXPLAIN="How much of the Claude plan's 5-hour window is left. At 0% Claude stops answering until it resets.";
+  const WEEK_EXPLAIN="Weekly limits on the same Claude plan: one for all models together, one for Fable alone. The bar tracks whichever is tighter.";
+  const SCHED_EXPLAIN="Prompts Claude runs on its own, on a timer — set with the schedule CLI, not from here.";
+  const WDAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  function cronEnglish(w){ // best-effort plain-English rendering of a 5-field cron; anything it doesn't recognize falls back to the raw string
+    w=String(w||"").trim();if(w==="now")return "once, right away";
+    const p=w.split(/\s+/);if(p.length!==5)return w;const [mi,hr,dy,mo,wd]=p;
+    if(dy!=="*"||mo!=="*")return w; // day-of-month / month rules are rare enough to just show raw
+    const pad=n=>String(n).padStart(2,"0");
+    const clock=(h,m)=>{const hh=+h,mm=+m,ap=hh<12?"am":"pm",h12=hh%12||12;return h12+(mm?":"+pad(mm):"")+ap};
+    if(/^\*\/\d+$/.test(mi)&&hr==="*"&&wd==="*")return "every "+mi.slice(2)+" min";
+    if(!/^\d+$/.test(mi))return w;
+    if(/^\*\/\d+$/.test(hr)&&wd==="*")return "every "+hr.slice(2)+"h, at :"+pad(mi);
+    if(!/^\d+$/.test(hr))return w;
+    if(wd==="*")return "daily at "+clock(hr,mi);
+    if(/^\d$/.test(wd))return "every "+WDAYS[+wd]+" at "+clock(hr,mi);
+    if(/^\d(,\d)+$/.test(wd))return wd.split(",").map(d=>WDAYS[+d]).join("/")+" at "+clock(hr,mi);
+    return w}
+  const battTxt=h("span",{class:"batt"});const compactBtn=h("button",{class:"jamMini",style:"font-size:10px;padding:1px 7px;margin-left:6px;border:1px solid var(--line2);border-radius:5px;background-color:transparent;color:var(--dim);cursor:pointer;display:none;flex:none",title:"Write a handoff and start a fresh session (context drops to a few k; cheaper turns, small models back in rotation)",onclick:()=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"say",text:"/compact"}))}},"compact");
+  const ctxMaskEl=h("i",{class:"fill"}),planMaskEl=h("i",{class:"fill"});const mtr=fillEl=>h("div",{class:"meter off"},fillEl);
+  const planTxt=h("span",{class:"batt"},"—"),weekTxt=h("span",{class:"batt"},"—"),weekMaskEl=h("i",{class:"fill"});
+  const tokSub=h("span",{}),planSub=h("div",{class:"msub txt"}),weekSub=h("div",{class:"msub txt"});
+  let usage=null;const clk=t=>{const d=new Date(t);return (d.getTime()-Date.now()>36e5*20?d.toLocaleDateString([],{weekday:"short"})+" ":"")+d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})};
+  const leftCls=left=>left<=10?" hot":left<=25?" warn":"";
+  const setFill=(el,left)=>{el.style.width=(left==null?0:left)+"%";el.parentNode.className="meter"+(left==null?" off":leftCls(left)+(left>=100?" full":""))}; // null = no reading: empty tube, neutral
+  const mk=(label,txt,mask,sub,tip)=>h("div",{class:"mtr",title:tip},h("div",{class:"meterHead"},h("span",{class:"k"},label),txt),mtr(mask),sub);
+  const tokRow=mk("tokens",battTxt,ctxMaskEl,h("div",{class:"msub"},tokSub,h("span",{class:"sp"}),compactBtn),CTX_EXPLAIN);
+  const planRow=mk("plan · 5-hour",planTxt,planMaskEl,planSub,PLAN_EXPLAIN);
+  const weekRow=mk("plan · weekly",weekTxt,weekMaskEl,weekSub,WEEK_EXPLAIN);
+  if(!isOwner){planRow.style.display="none";weekRow.style.display="none"} // the bridge host's own Claude quota — the worker only sends it to owners
+  function drawPlan(){const L=(usage&&usage.limits)||[];const s=L.find(l=>l.kind==="session");
+    const wk=L.filter(l=>l.group==="weekly");
+    if(!s){planTxt.className="batt";planTxt.textContent="not available";setFill(planMaskEl,null);
+      // no plan reading is the visible half of a broken host login, so for the owner this line is the way in
+      // a missing plan reading isn't proof of a broken login (a 429 backoff or the first minute after a bridge start
+      // looks the same), so this asks before spawning anything on the host
+      if(isOwner)planSub.replaceChildren(h("span",{},"unavailable · "),h("button",{class:"signinLink",title:"Run `claude auth login` on the host machine, from here",onclick:()=>{if(confirm("Start a Claude sign-in on the host machine?\n\nThis runs `claude auth login` there and gives you the link to finish it."))sendLogin({type:"login"})}},"sign in on the host →"));
+      else planSub.textContent="needs a Claude Code login on the bridge machine"}
+    else{const left=Math.max(0,Math.min(100,100-s.percent));planTxt.className="batt"+leftCls(left);planTxt.textContent=left+"% left";setFill(planMaskEl,left);planSub.textContent=s.resetsAt?"resets "+clk(s.resetsAt):"";planRow.title=PLAN_EXPLAIN+" Right now "+s.percent+"% is used."}
+    if(!wk.length){weekTxt.className="batt";weekTxt.textContent="not available";setFill(weekMaskEl,null);weekSub.textContent="";return}
+    const worst=wk.reduce((a,b)=>b.percent>a.percent?b:a);const wl=Math.max(0,Math.min(100,100-worst.percent));weekTxt.className="batt"+leftCls(wl);weekTxt.textContent=wl+"% left"+(worst.scope&&wk.length>1?" · "+worst.scope:"");setFill(weekMaskEl,wl);
+    weekSub.textContent=[...wk.filter(l=>l!==worst).map(l=>(l.scope||"all models")+" "+(100-l.percent)+"%"),...(worst.resetsAt?["resets "+clk(worst.resetsAt)]:[])].join(" · ")}
+  let ctxNow=0,ctxMax=0;const kfmt=n=>n>=1e6?(n/1e6).toFixed(n%1e6?1:0)+"M":n>=1e3?Math.round(n/1e3)+"k":String(n);
+  function drawBatt(){if(!ctxMax){tokRow.style.display="none";return}tokRow.style.display="";const left=Math.max(0,Math.min(100,Math.round(100*(1-ctxNow/ctxMax))));const cls=leftCls(left);battTxt.className="batt"+cls;battTxt.textContent=left+"% left";tokSub.textContent=kfmt(ctxNow)+" of "+kfmt(ctxMax)+" used";compactBtn.style.display=(me.role==="owner"||me.role==="driver")&&ctxNow>=50000?"":"none";setFill(ctxMaskEl,left);tokRow.title=CTX_EXPLAIN+" Right now: "+left+"% remains ("+ctxNow.toLocaleString()+"/"+kfmt(ctxMax)+" tokens used)."}
+  const priceEl=h("div",{class:"msub tprice"});
+  // per-MTok input/output price of the pinned model, or of the three models Auto routes between — from the live catalog
+  function drawPrice(){if(!catalog){priceEl.textContent="";return}const v=modelSel.value;let t,tip;
+    if(v==="auto"){const ms=["light","medium","heavy"].map(k=>catModel(catalog,catalog.tiers&&catalog.tiers[k])).filter(Boolean);t=ms.length?ms.map(priceTxt).join(" · ")+" per MTok":"";tip="Auto routes between these. Input/output price per million tokens, from Anthropic's pricing page."}
+    else{const m=catModel(catalog,v);t=m?priceTxt(m)+(m.price?" per MTok":"")+(m.window?" · "+winTxt(m.window)+" context":""):"";tip="Input/output price per million tokens, from Anthropic's pricing page."}
+    const old=Date.now()-catalog.ts>864e5;priceEl.textContent=t+(t&&old?" · as of "+new Date(catalog.ts).toLocaleDateString():"");priceEl.title=(t?t+". ":"")+tip+" Checked "+new Date(catalog.ts).toLocaleString()+"."}
+  const roomsEl=h("div",{});const modelSel=h("select",{class:"sel",style:"min-width:0;margin-top:0",title:"Auto routes each message by complexity; anything else pins every turn to that model.",onchange:async()=>{const prevModel=roomModel,prevEf=effortSel.value;roomModel=modelSel.value;const ef0=effortSel.value;syncEffort();drawPrice();const body={model:modelSel.value};if(effortSel.value!==ef0)body.effort=effortSel.value;/* the new model can't take the old effort: store the reset too, so the room and the picker agree */const r=await fetch("/api/rooms/"+encodeURIComponent(room)+"/settings?k="+encodeURIComponent(key),{method:"POST",body:JSON.stringify(body)}).then(r=>r.json()).catch(()=>({}));if(!r.ok){roomModel=prevModel;modelSel.value=prevModel;effortSel.value=prevEf;syncEffort();drawPrice()}toast(r.ok?"#"+room+" model → "+(modelSel.value==="auto"?"auto-route":(catModel(catalog,modelSel.value)||{label:modelSel.value}).label)+" (next turn)":(r.error||"needs the owner key"))}},
+    );
+  let catalog=null,roomModel=me.room.model||"auto";
+  function drawModels(){const v=roomModel;modelSel.replaceChildren(h("option",{value:"auto"},"Auto"),...catList(catalog,v).map(m=>h("option",{value:m.id},m.label)));modelSel.value=v;if(modelSel.value!==v)modelSel.value="auto";syncEffort();drawPrice()}
+  const effortSel=h("select",{class:"sel",style:"min-width:0;margin-top:0",onchange:async()=>{const r=await fetch("/api/rooms/"+encodeURIComponent(room)+"/settings?k="+encodeURIComponent(key),{method:"POST",body:JSON.stringify({effort:effortSel.value})}).then(r=>r.json()).catch(()=>({}));toast(r.ok?"#"+room+" effort → "+effortSel.value+" (next turn)":(r.error||"needs the owner key"))}},
+    h("option",{value:"auto"},"Auto"),h("option",{value:"low"},"Low"),h("option",{value:"medium"},"Medium"),h("option",{value:"high"},"High"),h("option",{value:"xhigh"},"XHigh"),h("option",{value:"max"},"Max"));
+  // Anthropic's real effort levels (how hard the model reasons) — gated by the selected model, not jam's own routing tier.
+  // Haiku 4.5 has no effort parameter at all, so picking it locks this to Auto instead of sending a flag it would reject.
+  // levels come from the catalog (Models API capabilities); before it arrives, the old rule: Haiku has none, the rest take all five
+  function syncEffort(){const m=catModel(catalog,modelSel.value);const all=["low","medium","high","xhigh","max"];const levels=modelSel.value==="auto"?all:m&&Array.isArray(m.effort)?m.effort:(/haiku/.test(modelSel.value)?[]:all);
+    for(const o of effortSel.options)o.disabled=o.value!=="auto"&&!levels.includes(o.value);
+    if(effortSel.selectedOptions[0]&&effortSel.selectedOptions[0].disabled)effortSel.value="auto";
+    effortSel.disabled=!levels.length;effortSel.title=levels.length?"How hard the model reasons before answering. Auto leaves it at the model's own default.":((m?m.label:"This model")+" doesn't support an effort setting — every turn runs at its default.")}
+  effortSel.value=me.room.effort||"auto";
+  const runLocalBox=h("input",{type:"checkbox",onchange:async()=>{const want=runLocalBox.checked;const r=await fetch("/api/rooms/"+encodeURIComponent(room)+"/settings?k="+encodeURIComponent(key),{method:"POST",body:JSON.stringify({runLocal:want})}).then(r=>r.json()).catch(()=>({}));if(!r.ok)runLocalBox.checked=!want;toast(r.ok?"#"+room+(want?": drivers can now run commands on this machine without asking (next turn)":": drivers' commands need your approval again (next turn)"):(r.error||"needs the owner key"))}});
+  runLocalBox.checked=!!me.room.runLocal;
+  const runLocalEl=h("label",{class:"runlocal",title:"When on, people driving this room run shell commands on your machine without an Allow card. They still run inside the sandbox (writes confined to the room, no sudo/keychain/localhost) but can read files and use the network, and they can leave background processes running. File tools, MCP and credential files still ask you. Ignored for a room whose folder is jam's own code. Takes effect on the next turn."},runLocalBox,h("span",{},"Run commands on this machine"));
+  drawModels();
+  syncEffort();
+  const moreBtn=h("button",{class:"more",style:"display:none",onclick:()=>loadEarlier()},"Load earlier");let oldestSeq=null,haveMore=false;
+  const typingEl=h("div",{class:"typing"});
+  const narrow=matchMedia("(max-width:600px)").matches;
+  const inEl=h("textarea",{placeholder:canDrive?(narrow?"Message Claude…":"Message Claude… (@ to bring in an agent)"):(narrow?"Spectator — watch only":"You're watching this session as a spectator"),rows:"1"});if(!canDrive)inEl.disabled=true;
+  const sendBtn=h("button",{onclick:()=>send()},"Send");
+  const fileIn=h("input",{type:"file",multiple:"",style:"display:none",accept:"image/*,.txt,.md,.csv,.json,.pdf,.log"});fileIn.addEventListener("change",()=>{addFiles([...fileIn.files]);fileIn.value=""});
+  const clipBtn=h("button",{class:"clip",title:"Attach a file or screenshot (or paste / drop one)",onclick:()=>fileIn.click()},"📎");
+  const attachEl=h("div",{class:"attach"});const workEl=h("span",{class:"workslot"});
+  /* prompt history: ↑ / ↓ recall your own earlier messages (shell-style) */
+  const hist=[];let hIdx=null,draft="",earlier=null; // history is rebuilt from the transcript already on screen — nothing is stored on the device
+  const hUp=h("button",{type:"button",title:"Previous prompt (↑)",onclick:()=>{histNav(-1);inEl.focus()}},"▲"),hDown=h("button",{type:"button",title:"Next prompt (↓)",onclick:()=>{histNav(1);inEl.focus()}},"▼");
+  const hnav=h("div",{class:"hnav"},hUp,hDown);
+  function histAdd(t){t=String(t||"").trim();if(!t)return;if(hist[hist.length-1]===t)return;hist.push(t);if(hist.length>300)hist.shift();hnav.classList.add("show");histButtons()}
+  function histButtons(){const i=hIdx===null?hist.length:hIdx;hUp.disabled=i<=0;hDown.disabled=hIdx===null}
+  function histNav(d){if(!hist.length)return;if(hIdx===null){if(d>0)return;draft=inEl.value;hIdx=hist.length-1}else{hIdx+=d;if(hIdx>=hist.length){hIdx=null}else if(hIdx<0){hIdx=0}}
+    inEl.value=hIdx===null?draft:hist[hIdx];grow();inEl.selectionStart=inEl.selectionEnd=inEl.value.length;histButtons()}const stopBtn=h("button",{class:"stop",disabled:"",title:"Interrupt the current turn",onclick:()=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"stop"}));else toast("Not connected to the room")}},"Stop");
+  const ac=h("div",{id:"ac"});
+  const sessEl=h("span",{class:"sess"});const budgetEl=h("span",{class:"budPill",style:"display:none"});const queueCnt=h("span",{});
+  const bridgePill=h("span",{class:"pill"},"connecting");const runPill=h("span",{class:"pill"},"idle");
+  const peopleEl=h("div",{});const teamEl=h("div",{class:"pills"});const invEl=h("div",{});
+  const cnt=h("span",{class:"cnt"}),roomsCnt=h("span",{class:"cnt"}),teamCnt=h("span",{class:"cnt"}),invCnt=h("span",{class:"cnt"}); // section counts, drawn as [n] by CSS
+  // collapsible sidebar sections: click a title to fold it; the box by the room name folds/unfolds all. Remembered per device.
+  let folded=new Set();try{folded=new Set(JSON.parse(localStorage.getItem("jam.fold")||"[]"))}catch{}
+  const secKey=s=>s.querySelector("h4").firstChild.textContent.trim();let secs=[];
+  // Approvals, Queue, Schedule (right pane) stay folded until something needs attention — a pending approval, a queued message, a scheduled turn running —
+  // and fold back once it clears. Expanding one by hand pins it open; folding it by hand hands it back to auto (quiet until the next new request).
+  const AUTO=new Set(["Approvals","Queue","Schedule"]);const autoIds={},autoSeen={},autoDis=new Set();
+  let pinOpen=new Set();try{pinOpen=new Set(JSON.parse(localStorage.getItem("jam.pinOpen")||"[]"))}catch{}
+  const isFold=s=>{const k=secKey(s);return AUTO.has(k)?!(pinOpen.has(k)||((autoIds[k]||[]).length&&!autoDis.has(k))):folded.has(k)};
+  const setFold=(s,fold)=>{const k=secKey(s);if(!AUTO.has(k))return fold?folded.add(k):folded.delete(k);if(fold){pinOpen.delete(k);if((autoIds[k]||[]).length)autoDis.add(k)}else{pinOpen.add(k);autoDis.delete(k)}};
+  const autoFold=(k,ids)=>{const seen=autoSeen[k]||(autoSeen[k]=new Set());if(!ids.length){seen.clear();autoDis.delete(k)}else if(ids.some(i=>!seen.has(i)))autoDis.delete(k);for(const i of ids)seen.add(i);autoIds[k]=ids;if(secs.length)drawFold()}; // seen ids survive reconnect replays, so only a genuinely new request re-opens a section folded by hand
+  const anyOpen=()=>secs.some(s=>s.style.display!=="none"&&!isFold(s)); // hidden sections (Rooms for guests, empty Subagents) don't count
+  const drawFold=()=>{secs.forEach(s=>s.classList.toggle("fold",isFold(s)));const open=anyOpen();foldAll.textContent=open?"−":"+";foldAll.title=open?"Collapse all sections":"Expand all sections";try{localStorage.setItem("jam.fold",JSON.stringify([...folded]));localStorage.setItem("jam.pinOpen",JSON.stringify([...pinOpen]))}catch{}};
+  const foldAll=h("button",{class:"foldall",onclick:()=>{const open=anyOpen();secs.forEach(s=>setFold(s,open));drawFold()}},"−");
+  const side=h("aside",{},
+    h("div",{class:"brand"},h("span",{class:"logo"},"j"),h("b",{},"jam"),h("span",{class:"room"+(isOwner?" edit":""),title:isOwner?"Rename this room":"",onclick:isOwner?renameDialog:null},"#"+room,isOwner?" ✎":""),foldAll),
+    h("section",{id:"roomsSec",style:"display:none"},h("h4",{},"Rooms ",roomsCnt),roomsEl),
+    h("section",{},h("h4",{},"People ",cnt),peopleEl),
+    isOwner?h("section",{},h("h4",{},"Invites ",invCnt),invEl,h("button",{class:"sbtn",style:"margin-top:6px",onclick:inviteDialog},"+ Invite someone")):null,
+    h("section",{id:"teamSec",style:"display:none"},h("h4",{},"Subagents ",teamCnt),teamEl,h("p",{style:"margin:8px 0 0;font-size:12px;color:var(--dim2)"},"On call. Pulled in automatically when it fits, or type @name.")),
+    h("section",{class:"mSearch"},h("h4",{},"Search transcript"),h("input",{type:"text",placeholder:"keyword or regex",style:"width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px;font-family:var(--mono)",id:"searchInputM",onkeyup:e=>doSearch(e.target.value)})),
+    h("section",{},h("button",{class:"sbtn",onclick:exportTranscript},"⤓ Export transcript")),
+    h("div",{class:"meBar"},av(name),h("span",{},name," · ",role),h("span",{style:"margin-left:auto;display:flex;gap:10px"},me.name?null:h("button",{onclick:()=>{try{localStorage.removeItem("jam.name")}catch{}location.reload()}},"rename"),h("button",{onclick:()=>{if(confirm("Forget this key on this device?"))signOut()}},"sign out"))));
+  /* ── right context pane: live snapshot of the current turn + room status, desktop only (hidden <=860px, see @media) ── */
+  const turnCost=h("b",{});
+  const ctxApprEl=h("div",{}),ctxApprCnt=h("span",{class:"cnt"}),apprEmpty=h("div",{class:"empty"},"Nothing pending.");
+  const ctxQueueEl=h("div",{class:"queue show"}),ctxQueueCnt=h("span",{class:"cnt"}),queueEmpty=h("div",{class:"empty"},"Nothing queued.");
+  const schedEl=h("div",{}),schedCnt=h("span",{class:"cnt"});
+  const apprSec=h("section",{},h("h4",{},"Approvals ",ctxApprCnt),apprEmpty,ctxApprEl);
+  const ctx=h("div",{class:"ctx"},
+    h("section",{style:"border-top:0"},h("h4",{},"Turn"),
+      h("div",{class:"tstat"},bridgePill,runPill),
+      isOwner?h("div",{class:"tctl"},h("label",{},"model",modelSel),h("label",{},"effort",effortSel)):null,
+      isOwner?priceEl:null,
+      isOwner?runLocalEl:null,
+      h("div",{class:"meters"},tokRow,planRow,weekRow),
+      h("div",{class:"tcost"},h("span",{class:"k"},"#"+room+" cost"),turnCost)),
+    apprSec,
+    h("section",{},h("h4",{},"Queue ",ctxQueueCnt),queueEmpty,ctxQueueEl),
+    h("section",{},h("h4",{},"Schedule ",schedCnt),h("p",{style:"margin:0 0 6px;font-size:11px;color:var(--dim2)"},SCHED_EXPLAIN),schedEl),
+    h("section",{},h("h4",{},"Search transcript"),h("input",{type:"text",placeholder:"keyword or regex",style:"width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px;font-family:var(--mono)",id:"searchInput",onkeyup:()=>doSearch()})));
+  function refreshApprEmpty(){apprEmpty.style.display=ctxApprEl.children.length?"none":""}
+  function refreshQueueEmpty(){queueEmpty.style.display=ctxQueueEl.children.length?"none":""}
+  refreshApprEmpty();refreshQueueEmpty();
+  /* click a row in the right pane → scroll the transcript to that tool card, open it, flash it */
+  function jumpTo(callId){const el=document.getElementById("t-"+callId);if(!el)return;el.classList.add("open");pinned=false;el.scrollIntoView({behavior:"smooth",block:"center"});el.classList.remove("flash");void el.offsetWidth;el.classList.add("flash")}
+  function drawSchedCtx(){schedEl.innerHTML="";schedCnt.textContent=schedules.length||"";if(!schedules.length){schedEl.append(h("div",{class:"empty"},"None scheduled."));return}
+    for(const s of schedules){const prompt=String(s.prompt||"").trim();const snippet=prompt.length>64?prompt.slice(0,61)+"…":prompt;
+      schedEl.append(h("div",{class:"sched2",title:s.when+(prompt?" — \""+prompt+"\"":"")},h("span",{class:"m"},cronEnglish(s.when)),h("span",{},s.tier||"auto")),
+        prompt?h("div",{style:"font-size:11px;color:var(--dim2);margin:-2px 0 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"},snippet):"")}} // append() prints a bare null as text
+  drawTeam();drawSchedCtx();
+  secs=[...side.querySelectorAll("section"),...ctx.querySelectorAll("section")].filter(s=>s.querySelector("h4"));
+  secs.forEach(s=>{s.querySelector("h4").onclick=()=>{setFold(s,!isFold(s));drawFold()}});drawFold();
+  const menuBtn=h("button",{class:"menu",onclick:()=>{side.classList.toggle("open");$("#scrim").classList.toggle("open",side.classList.contains("open"))}},"☰");
+  $("#scrim").onclick=()=>{side.classList.remove("open");$("#scrim").classList.remove("open")};
+  /* drag-to-resize both side panes, capped at 30% of viewport width each (never more, per Mike) */
+  function makeResizer(el,storageKey,grow){
+    const lsKey="jam."+storageKey;try{const saved=+localStorage.getItem(lsKey);if(saved)el.style.width=saved+"px"}catch{}
+    const maxW=()=>Math.min(560,Math.round(innerWidth*0.3));
+    const bar=h("div",{class:"resizer"});
+    bar.addEventListener("pointerdown",e=>{
+      bar.setPointerCapture(e.pointerId);bar.classList.add("active");
+      const startX=e.clientX,startW=el.getBoundingClientRect().width;
+      const onMove=ev=>{const dx=ev.clientX-startX;let w=grow==="right"?startW+dx:startW-dx;w=Math.max(180,Math.min(maxW(),w));el.style.width=w+"px"};
+      const onUp=()=>{bar.classList.remove("active");bar.removeEventListener("pointermove",onMove);bar.removeEventListener("pointerup",onUp);try{localStorage.setItem(lsKey,String(Math.round(el.getBoundingClientRect().width)))}catch{}};
+      bar.addEventListener("pointermove",onMove);bar.addEventListener("pointerup",onUp)});
+    bar.addEventListener("dblclick",()=>{el.style.width="";try{localStorage.removeItem(lsKey)}catch{}toast("Pane width reset")});bar.title="Drag to resize · double-click to reset";
+    return bar}
+  const leftResizer=makeResizer(side,"sideW","right"),rightResizer=makeResizer(ctx,"ctxW","left");
+  addEventListener("resize",()=>{const maxW=Math.min(560,Math.round(innerWidth*0.3));for(const el of [side,ctx]){const w=el.getBoundingClientRect().width;if(w>maxW)el.style.width=maxW+"px"}});
+  /* sponsor slot, pinned to the bottom of the right pane (and the sidebar drawer on mobile, where the pane is hidden) — public GET, hidden until a sponsor is set */
+  const sponsorEl=h("div",{class:"sponsor"}),sponsorM=h("div",{class:"sponsor"});
+  function fillSponsor(el,s){if(/^null agency$/i.test(s.name)){/* house brand: slashed-zero lockup instead of the plain text line */el.classList.add("na");const a=h("a",{href:s.url||"https://nullagency.io",target:"_blank",rel:"noopener",title:"Null Agency — technically, nobody works here."});a.innerHTML='<span class="by">sponsored by</span><svg viewBox="0 0 32 32" aria-hidden="true"><ellipse cx="16" cy="16" rx="8.5" ry="12.5" fill="none" stroke="#00FFB4" stroke-width="2.6"/><line x1="9" y1="26.5" x2="23" y2="5.5" stroke="#00FFB4" stroke-width="2.6" stroke-linecap="round"/></svg><span class="wm"><i>NULL</i> AGENCY<u>_</u></span>';el.append(a)}else el.append("Sponsored by ",s.url?h("a",{href:s.url,target:"_blank",rel:"noopener"},s.name):h("span",{},s.name));el.classList.add("show")}
+  fetch("/api/sponsor").then(r=>r.json()).then(d=>{const s=d.sponsor;if(!s||!s.name)return;fillSponsor(sponsorEl,s);fillSponsor(sponsorM,s)}).catch(()=>{});
+  ctx.append(sponsorEl);side.insertBefore(sponsorM,side.querySelector(".meBar"));
+  /* jump-to-latest pill (shows when scrolled up and something new lands), right-pane toggle, shortcut legend */
+  const jump=h("button",{class:"jump",onclick:()=>toBottom()},"↓ New messages");
+  /* live browser view: frames from browser.mjs while Claude drives it (never stored); hides a moment after the run ends */
+  let liveSid=null,liveHide=null,liveClosed=null;
+  const liveImg=h("img",{alt:"Live view of Claude's browser"}),liveLbl=h("span",{class:"lvLbl"}),liveUrl=h("span",{class:"lvUrl"}),liveTag=h("b",{},"LIVE");
+  const liveEl=h("div",{class:"live",style:"display:none"},h("div",{class:"lvHead"},h("span",{class:"lvDot"}),liveTag,h("span",{class:"k"},"browser"),liveLbl,
+    h("button",{class:"lvBtn",title:"Bigger / smaller",onclick:()=>liveEl.classList.toggle("big")},"⤢"),h("button",{class:"lvBtn",title:"Hide until the next run",onclick:()=>{liveClosed=liveSid;liveEl.style.display="none"}},"✕")),liveImg,liveUrl);
+  function drawLive(e){
+    if(e.end){if(e.sid===liveSid){liveEl.classList.add("ended");liveTag.textContent="DONE";clearTimeout(liveHide);liveHide=setTimeout(()=>{liveEl.style.display="none"},2500)}return}
+    if(e.sid!==liveSid){liveSid=e.sid;liveEl.classList.remove("ended");liveTag.textContent="LIVE";liveImg.removeAttribute("src");liveImg.style.visibility="hidden"}
+    if(liveClosed===e.sid)return;
+    if(e.data){liveImg.src="data:image/jpeg;base64,"+e.data;liveImg.style.visibility=""}
+    if(e.label)liveLbl.textContent=e.label;liveUrl.textContent=e.url||"";
+    liveEl.style.display="";clearTimeout(liveHide);liveHide=setTimeout(()=>{liveEl.style.display="none"},15000); // a run that died without an end message
+  }
+  let ctxHidden=false;try{ctxHidden=localStorage.getItem("jam.ctxHide")==="1"}catch{}
+  const ctxTog=h("button",{class:"ctxTog"},"");
+  function drawCtxTog(){ctx.classList.toggle("hide",ctxHidden);rightResizer.classList.toggle("hide",ctxHidden);ctxTog.classList.toggle("off",ctxHidden);ctxTog.textContent=ctxHidden?"⟨":"⟩";ctxTog.title=ctxHidden?"Show the context pane (⌘.)":"Hide the context pane (⌘.)"}
+  ctxTog.onclick=()=>{ctxHidden=!ctxHidden;try{localStorage.setItem("jam.ctxHide",ctxHidden?"1":"0")}catch{}drawCtxTog()};drawCtxTog();
+  const legend=canDrive?h("span",{class:"kbd"},h("b",{},"↑"),"history",h("span",{class:"sep"},"·"),h("b",{},"@"),"agent",h("span",{class:"sep"},"·"),h("a",{onclick:()=>shortcuts()},"⌘/ all")):null;
+  function shortcuts(){if($(".ov.sc-ov"))return $(".ov.sc-ov").remove();const rows=[["Send","⏎"],["Newline","⇧ ⏎"],["Recall earlier prompt","↑ / ↓"],["Mention a subagent or person","@"],["Attach a file","⌘V paste · drop · 📎"],isOwner?["Allow / deny the oldest pending approval","Y / N"]:null,["Toggle the context pane","⌘ ."],["Focus the composer","Esc"],["This list","⌘ /"],["Resize a pane","drag its edge · double-click resets"]].filter(Boolean);
+    const ov=h("div",{class:"ov sc-ov",onclick:e=>{if(e.target===ov)ov.remove()}},h("div",{class:"card"},h("h2",{},"Keyboard shortcuts"),h("div",{},...rows.map(([l,k])=>h("div",{class:"sc"},h("span",{},l),h("span",{class:"kbd"},...k.split(" · ").flatMap((p,i)=>i?[h("span",{class:"sep"},"·"),h("b",{},p)]:[h("b",{},p)])))))));root.append(ov)}
+  const app=h("div",{class:"app"},side,leftResizer,h("div",{class:"mainCol"},
+    h("header",{class:"top"},menuBtn,h("b",{},"jam"),h("span",{class:"room"},"#"+room),h("span",{style:"flex:1"}),runPill.cloneNode(true)),
+    topAct,
+    h("div",{class:"logbox"},logEl,jump,liveEl),
+    h("footer",{class:"comp"},h("div",{class:"cwrap"},actBar,authBar,pendingBar,typingEl,attachEl,h("div",{class:"row"},ac,fileIn,h("div",{class:"tawrap"},inEl,canDrive?clipBtn:null,canDrive?hnav:null)),h("div",{class:"hint"},workEl,legend,budgetEl,sessEl,queueCnt,canDrive?h("div",{class:"hbtns"},sendBtn,stopBtn):null)))),
+    rightResizer,h("div",{class:"ctxDock"},ctxTog),ctx);
+  root.append(app);
+  const topPill=()=>$("header.top .pill",app);
+  /* global keys: Y/N answer the oldest pending approval (owner, focus outside an input), ⌘/ shortcuts, ⌘. toggles the pane, Esc focuses the composer */
+  document.addEventListener("keydown",e=>{const inField=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)||e.target.isContentEditable;const mod=e.metaKey||e.ctrlKey;
+    if(mod&&e.key==="/"){e.preventDefault();shortcuts();return}
+    if(mod&&e.key==="."){e.preventDefault();ctxTog.click();return}
+    if(e.key==="Escape"){const ov=$(".ov.sc-ov");if(ov){ov.remove();return}if(!inField&&canDrive){inEl.focus();return}}
+    if(inField||mod||e.altKey)return;
+    if(isOwner&&(e.key==="y"||e.key==="n")){const id=Object.keys(pending)[0];if(!id||!ws||ws.readyState!==1)return;e.preventDefault();ws.send(JSON.stringify({type:"approve",id,ok:e.key==="y"}));toast(e.key==="y"?"Allowed":"Denied")}});
+
+  /* rendering */
+  const atBottom=()=>logEl.scrollHeight-logEl.scrollTop-logEl.clientHeight<160;
+  let pinned=true;
+  const toBottom=()=>{pinned=true;logEl.scrollTop=logEl.scrollHeight;jump.classList.remove("show")};
+  const scroll=f=>{if(target)return;if(f||pinned)toBottom();else jump.classList.add("show")};
+  logEl.addEventListener("scroll",()=>{pinned=atBottom();if(pinned)jump.classList.remove("show")},{passive:true});
+  new ResizeObserver(()=>{if(pinned&&!target)logEl.scrollTop=logEl.scrollHeight}).observe(logWrap);
+  const emptyNote=h("div",{class:"emptyRoom"},h("b",{},"Nothing here yet"),canDrive?"Say something below to start the session.":"The transcript will appear here once someone starts the session.");
+  const add=el=>{if(emptyNote.isConnected)emptyNote.remove();(target||logWrap).append(el);scroll();return el};
+  /* consecutive tool calls fold into one summary card; 3+ collapse behind it, fewer stay inline. Screenshots never fold. */
+  const FOLD_AT=3;
+  function groupFor(){const par=target||logWrap;const last=par.lastElementChild;if(last&&last.classList.contains("tgrp"))return last._g;
+    const g={cards:[],touched:false};const body=h("div",{class:"gb"});const gs=h("span",{class:"gs"});const bar=h("span");const gt=h("div",{class:"gt"});const now=h("div",{class:"now"});
+    const el=h("div",{class:"tgrp few"},h("div",{class:"gh",onclick:()=>{g.touched=true;el.classList.toggle("open")}},h("span",{class:"gic"},"◇"),h("div",{class:"gm"},gt,now,h("div",{class:"bar"},bar)),gs,h("span",{class:"cv"},"▸")),body);
+    Object.assign(g,{el,body,gs,bar,gt,now});el._g=g;add(el);return g}
+  function drawGroup(g){if(!g)return;const n=g.cards.length;g.el.classList.toggle("few",n<FOLD_AT);if(n<FOLD_AT)return;
+    const by={};let done=0,err=0;for(const t of g.cards){by[t.name]=(by[t.name]||0)+1;const s=t.st.textContent;if(s){done++;if(s==="error")err++}}
+    g.gt.replaceChildren(h("b",{},n+" steps"),...Object.entries(by).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([k,v])=>h("span",{class:"chip"},k,h("i",{},v))));
+    const cur=[...g.cards].reverse().find(t=>!t.st.textContent)||g.cards[n-1];g.now.replaceChildren(h("span",{},done<n?"→ ":"last · "),h("b",{},cur.name)," ",cur.summary);
+    g.bar.style.width=(100*done/n)+"%";const run=n-done;
+    g.gs.className="gs"+(run?"":err?" err":" ok");const errTxt=err+" error"+(err>1?"s":"");g.gs.replaceChildren(...(run?[h("span",{class:"sp"}),run+" running",err?h("span",{style:"color:var(--err)"},"· "+errTxt):null]:[err?errTxt:"✓ done"]))}
+  logWrap.append(moreBtn);
+  const icons={Bash:"$",Edit:"✎",MultiEdit:"✎",Write:"+",Read:"≡",Grep:"⌕",Glob:"⌕",Agent:"◇",WebFetch:"↗",WebSearch:"↗",TodoWrite:"☑",Browser:"🌐"};
+  function toolCard(e){
+    const st=h("span",{class:"st"}); // no child text node: `.st:empty` draws the in-flight spinner until the result lands
+    const bd=h("div",{class:"bd"});
+    const card=h("div",{class:"tool",id:"t-"+e.callId},h("div",{class:"hd",onclick:()=>card.classList.toggle("open")},h("span",{class:"ic"},icons[e.name]||"·"),h("b",{},e.name),h("span",{class:"s"},e.summary||""),st),bd);
+    const inp=e.input||{};
+    if(e.image){
+      card.classList.add("open");bd.style.maxHeight="640px";
+      const imgWrapper=h("div",{style:"position:relative;display:inline-block;max-width:100%"});
+      const img=h("img",{src:e.image,alt:e.summary||"screenshot",style:"max-width:100%;border-radius:6px;display:block;cursor:crosshair"});
+      const dot=h("div",{style:"position:absolute;width:8px;height:8px;background:red;border-radius:50%;border:2px solid white;display:none;pointer-events:none;transform:translate(-50%,-50%);"});
+      img.addEventListener("click",function(ev){
+        if(!canDrive)return; // viewers cannot trigger clicks
+        const rect=img.getBoundingClientRect();const x=Math.round((ev.clientX-rect.left)*(img.naturalWidth/rect.width));const y=Math.round((ev.clientY-rect.top)*(img.naturalHeight/rect.height));
+        dot.style.display="block";dot.style.left=(ev.clientX-rect.left)+"px";dot.style.top=(ev.clientY-rect.top)+"px";
+        ws.send(JSON.stringify({type:"browser-click",x,y,callId:e.callId}));
+      });
+      imgWrapper.append(img,dot);
+      bd.append(imgWrapper,inp.url?h("div",{class:"lbl",style:"margin-top:6px"},inp.url):null);
+    }
+    else if(e.name==="Edit"&&inp.old_string!=null){bd.append(h("div",{class:"lbl"},inp.file_path||""),h("span",{class:"del"},"- "+inp.old_string),h("span",{class:"add"},"+ "+inp.new_string))}
+    else if(e.name==="Write"){bd.append(h("div",{class:"lbl"},inp.file_path||""),document.createTextNode(inp.content||""))}
+    else if(e.name==="Bash"){bd.append(h("div",{class:"lbl"},inp.description||"command"),document.createTextNode(inp.command||""))}
+    else if(Object.keys(inp).length){bd.append(h("div",{class:"lbl"},"input"),document.createTextNode(JSON.stringify(inp,null,1)))}
+    tools[e.callId]={card,bd,st,turn:e.id,name:e.name,summary:e.summary||""};return card}
+  // a turn that ended with no result for a card (killed mid-tool, or the entry was lost) must not spin forever
+  function endTools(id){const gs=new Set();for(const t of Object.values(tools))if(t.turn===id&&!t.st.textContent){t.st.textContent="no result";t.st.style.color="var(--dim2)";gs.add(t.g)}for(const g of gs)drawGroup(g)}
+  function toolResult(e){const t=tools[e.callId];if(t){t.st.textContent=e.is_error?"error":"ok";t.st.className="st "+(e.is_error?"err":"ok");t.st.style.color="";if(e.text){t.bd.append(h("div",{class:"lbl"},"result"),document.createTextNode(e.text))}drawGroup(t.g)}if(agentRuns[e.callId]){delete agentRuns[e.callId];drawTeam()}}
+  function approvalCard(e){
+    const isP=e.state==="pending";
+    const c=h("div",{class:"appr"+(isP?"":" done "+e.state),id:"a-"+e.id},
+      h("div",{class:"t"},isP?"⏸ Approval needed":(e.state==="allowed"?"✓ Allowed":"✕ Denied")+(e.by?" by "+e.by:""),h("span",{style:"color:var(--dim);font-weight:400"},"· ",e.from," asked Claude to run ",e.tool)),
+      h("pre",{},e.summary),
+      isP&&isOwner?h("div",{class:"acts"},h("button",{class:"ok",onclick:()=>ws.send(JSON.stringify({type:"approve",id:e.id,ok:true}))},"Allow"),h("button",{class:"no",onclick:()=>ws.send(JSON.stringify({type:"approve",id:e.id,ok:false}))},"Deny"),h("span",{class:"hk",title:"Keyboard: Y allows, N denies the oldest pending approval"},"Y / N")):
+      isP?h("div",{style:"font-size:12px;color:var(--dim)"},"Waiting for the owner to allow or deny…"):null);
+    return c}
+  let lastM=0; // highest message ordinal rendered here, regardless of tab visibility — see the visibilitychange flush below
+  function render(e){
+    if(e._s!=null&&(oldestSeq===null||e._s<oldestSeq))oldestSeq=e._s;
+    if(e._m!=null){lastM=Math.max(lastM,e._m);if(!document.hidden)setSeen(room,e._m)} // a backgrounded tab still renders incoming messages but must not mark them "seen" — nobody's looking
+    if(e.type==="say"){if(e.from===name){if(earlier)earlier.push(e.text);else histAdd(e.text)}if(!target)pinned=true;add(h("div",{class:"msg say"},av(e.from),h("div",{class:"c"},h("div",{class:"meta"},h("span",{class:"n",style:"color:"+col(e.from)},e.from),h("span",{},ts(e.ts))),h("div",{class:"body",html:linkOnly(e.text||"")},e.attachments&&e.attachments.length?h("div",{class:"atts"},...e.attachments.map(a=>a.thumb?h("img",{src:a.thumb,alt:a.name,title:a.name}):h("span",{class:"f"},"📎 "+a.name))):null))));return}
+    if(e.type==="tool"){live_.lastTool=e.label||e.name;if(e.task)live_.currentTask=e.task;drawAct();const tc=toolCard(e);if(e.image)add(tc);else{const g=groupFor();const t=tools[e.callId];t.g=g;g.cards.push(t);g.body.append(tc);drawGroup(g);scroll()}if(e.name==="Agent"&&!earlier){agentRuns[e.callId]={type:(e.input&&e.input.subagent_type)||"agent"};drawTeam()}return}
+    if(e.type==="tool_result"){toolResult(e);return}
+    if(e.type==="delta"){let l=live[e.id];if(l&&!l.el.isConnected){delete live[e.id];l=null}if(!l){const body=h("div",{class:"body cursor"});add(h("div",{class:"msg ai"},av("Claude","linear-gradient(135deg,var(--ai),#5fd3a1)"),h("div",{class:"c"},h("div",{class:"meta"},h("span",{class:"n",style:"color:var(--ai)"},"Claude"),h("span",{},ts())),body)));l=live[e.id]={el:body,text:""}}l.text+=e.text;l.el.innerHTML=md(l.text);scroll();return}
+    if(e.type==="done"){endTools(e.id);if(e.roomCost!=null)roomCost=+e.roomCost||0;if(e.cost||e.roomCost!=null)drawCost();if(e.ctx&&e.ctxMax){ctxNow=e.ctx;ctxMax=e.ctxMax;drawBatt()}if(Object.keys(agentRuns).length){agentRuns={};drawTeam()}const cs=h("span",{},e.model?h("span",{class:"tier",title:"Model that answered"},e.model.replace("claude-","").replace(/-\d{8}$/,"")):null," ",e.cost?h("span",{class:"c$",title:"$"+(+e.cost).toFixed(4)},+e.cost<0.005?"<$0.01":"$"+(+e.cost).toFixed(2)):null);let l=live[e.id];if(l&&!l.el.isConnected){delete live[e.id];l=null}if(l){const mg=l.el.closest(".msg");if(mg&&mg.parentNode&&mg.parentNode.lastElementChild!==mg)mg.parentNode.append(mg);l.el.classList.remove("cursor");l.el.innerHTML=md(e.text||l.text);l.el.previousSibling.append(cs);delete live[e.id]}else add(h("div",{class:"msg ai"},av("Claude","linear-gradient(135deg,var(--ai),#5fd3a1)"),h("div",{class:"c"},h("div",{class:"meta"},h("span",{class:"n",style:"color:var(--ai)"},"Claude"),h("span",{},ts(e.ts)),cs),h("div",{class:"body",html:md(e.text||"")}))));if(!target)toBottom();return}
+    if(e.type==="error"){endTools(e.id);if(!target)pinned=true;let l=live[e.id];if(l){l.el.classList.remove("cursor");delete live[e.id]}add(h("div",{class:"msg ai err"},av("!",  "var(--err)"),h("div",{class:"c"},h("div",{class:"meta"},h("span",{class:"n",style:"color:var(--err)"},"error"),h("span",{},ts(e.ts))),h("div",{class:"body",html:linkOnly(e.text||"")}))));return}
+    if(e.type==="approval"){if(e.state==="pending"){const old=$("#a-"+e.id,pendingBar);if(old)old.remove();const old2=$("#a-"+e.id,ctxApprEl);if(old2)old2.remove();pendingBar.append(approvalCard(e));ctxApprEl.append(approvalCard(e));pending[e.id]=e}else{const old=$("#a-"+e.id,pendingBar);if(old)old.remove();const old2=$("#a-"+e.id,ctxApprEl);if(old2)old2.remove();delete pending[e.id];add(approvalCard(e))}const np=Object.keys(pending).length;autoFold("Approvals",Object.keys(pending));ctxApprCnt.textContent=np||"";apprSec.classList.toggle("hot",np>0);refreshApprEmpty();drawTitle();return}
+    if(e.type==="sys"){add(h("div",{class:"sys"},e.text))}}
+  const WORK='<span class="work">.:[ working ]:.</span>';
+  /* activity bar: working / stalled / dead / reconnecting */
+  const live_={running:false,since:0,lastTool:null,currentTask:null,lastHb:0,wsOpen:false,bridge:null};
+  const fmt=ms=>{const t=Math.max(0,Math.floor(ms/1000));return (t>=3600?Math.floor(t/3600)+":"+String(Math.floor(t%3600/60)).padStart(2,"0"):Math.floor(t/60))+":"+String(t%60).padStart(2,"0")};
+  function drawTitle(){const n=isOwner?Object.keys(pending).length:0;document.title=(n?"("+n+") ":"")+"jam #"+room}
+  function drawCost(){turnCost.textContent=roomCost?"$"+roomCost.toFixed(2):"–";turnCost.title=roomCost?"$"+roomCost.toFixed(4):""}
+  function queueRow(q){return h("span",{class:"qi",title:q.text},h("span",{class:"t"},h("b",{},q.from),": ",q.text),(q.from===name||isOwner)?h("button",{title:"Cancel",onclick:()=>ws.send(JSON.stringify({type:"unqueue",id:q.id}))},"✕"):null)}
+  function drawQueue(items){ctxQueueEl.innerHTML="";for(const q of items)ctxQueueEl.append(queueRow(q));ctxQueueCnt.textContent=items.length||"";refreshQueueEmpty();autoFold("Queue",items.map(q=>String(q.id)))}
+  let dragging=false;async function drawRooms(pre){if(dragging&&!pre)return;if(!isOwner){$("#roomsSec",side).style.display="none";return} // /api/rooms is owner-only; skip the fetch so viewers/drivers stop logging a 403
+    const d=pre?{rooms:pre}:await fetch("/api/rooms?k="+encodeURIComponent(key)).then(r=>r.json()).catch(()=>({}));const rs=d.rooms||[];const sec=$("#roomsSec",side);if(!isOwner&&rs.length<2){sec.style.display="none";return}sec.style.display="";roomsEl.innerHTML="";roomsCnt.textContent=rs.length;for(const r of rs){const isCur=r.name===room;const unread=isCur?0:unreadOf(r);const wrapper=h("div",{draggable:"true",style:"cursor:grab"},h("a",{class:"roomlink"+(isCur?" cur":"")+(unread?" unread":""),href:"/r/"+encodeURIComponent(r.name),style:"pointer-events:auto"},av(r.name),h("button",{class:"roomLeave",title:"Leave this room",onclick:e=>{e.preventDefault();e.stopPropagation();if(confirm("Leave #"+r.name+"?"))location.href="/"}},"−"),h("span",{},"#"+r.name),unread?h("span",{class:"ucnt"},unread>99?"99+":String(unread)):null));
+    wrapper.addEventListener("dragstart",e=>{dragging=true;wrapper.style.opacity="0.5";e.dataTransfer.effectAllowed="move";e.dataTransfer.setData("text",r.name)});
+    wrapper.addEventListener("dragover",e=>{e.preventDefault();e.dataTransfer.dropEffect="move";wrapper.classList.add("drag-over")});
+    wrapper.addEventListener("dragleave",e=>{wrapper.classList.remove("drag-over")});
+    wrapper.addEventListener("drop",e=>{e.preventDefault();e.stopPropagation();dragging=false;wrapper.classList.remove("drag-over");const src=e.dataTransfer.getData("text");if(src&&src!==r.name){const srcIdx=rs.findIndex(a=>a.name===src);const tgtIdx=rs.findIndex(a=>a.name===r.name);if(srcIdx!==-1&&tgtIdx!==-1){const moved=rs.splice(srcIdx,1)[0];rs.splice(tgtIdx,0,moved);drawRooms(rs.slice());fetch("/api/rooms/order?k="+encodeURIComponent(key),{method:"POST",body:JSON.stringify({order:rs.map(x=>x.name)})}).then(r=>{if(!r.ok)throw new Error(r.status);return r}).catch(err=>{console.error("Order save failed:",err);alert("Couldn't save the room order ("+err.message+")")}).then(()=>{drawRooms()})}}});
+    wrapper.addEventListener("dragend",e=>{dragging=false;wrapper.style.opacity="1";wrapper.classList.remove("drag-over")});
+    roomsEl.append(wrapper)}if(isOwner&&!me.name)roomsEl.append(h("a",{class:"roomlink",href:"/#new",style:"color:var(--dim)"},h("span",{class:"av",style:"background:var(--panel2);color:var(--dim)"},"+"),h("span",{},"Lobby / new room")))}
+  async function exportTranscript(){try{const r=await fetch("/api/export?k="+encodeURIComponent(key)+"&room="+encodeURIComponent(room));const b=await r.blob();const a=h("a",{href:URL.createObjectURL(b),download:"jam-"+room+".md"});document.body.append(a);a.click();a.remove()}catch{toast("export failed")}}
+  function doSearch(q){q=(q!=null?q:$("#searchInput").value).trim().toLowerCase();for(const el of logWrap.children){if(el===moreBtn)continue;const text=(el.classList.contains("tgrp")?el.textContent:el.innerText).toLowerCase();const show=!q||text.includes(q);el.style.display=show?"":"none"}}
+  async function loadEarlier(){if(oldestSeq===null)return;moreBtn.disabled=true;moreBtn.textContent="Loading…";try{const d=await fetch("/api/history?k="+encodeURIComponent(key)+"&room="+encodeURIComponent(room)+"&before="+oldestSeq).then(r=>r.json());const items=d.items||[];const frag=document.createDocumentFragment();target=frag;earlier=[];for(const x of items)render(x);target=null;const older=earlier.map(t=>String(t||"").trim()).filter(Boolean);earlier=null;if(older.length){hist.unshift(...older);while(hist.length>300)hist.shift();if(hIdx!==null)hIdx+=older.length;hnav.classList.add("show");histButtons()}const before=logEl.scrollHeight;pinned=false;moreBtn.after(frag);logEl.scrollTop+=logEl.scrollHeight-before;haveMore=!!d.more&&items.length>0;moreBtn.style.display=haveMore?"":"none"}catch{toast("could not load history")}moreBtn.disabled=false;moreBtn.textContent="Load earlier"}
+  function drawAct(){const L=live_;actBar.className="act";actBar.innerHTML="";
+    const summary=L.running?(L.currentTask||L.lastTool||L.route||"thinking"):"";
+    
+    topAct.className="act topAct"+(L.running?" show":"");topAct.innerHTML="";
+    if(L.running)topAct.append(h("span",{class:"dot"}),h("span",{class:"lt"},summary),h("span",{class:"el"},L.since?fmt(Date.now()-L.since):""));
+    if(!L.wsOpen){actBar.classList.add("show","recon");actBar.append(h("span",{class:"dot"}),h("span",{},"Reconnecting to the room…"));topAct.classList.add("recon");return}
+    if(L.bridge===false){actBar.classList.add("show","dead");actBar.append(h("span",{class:"dot"}),h("span",{},"Bridge offline — Claude can't hear you. Start the bridge on the host machine."));topAct.classList.add("dead");return} // top bar mirrors the state so its dot and charge line never vouch for a dead link
+    if(!L.running)return;
+    const age=L.lastHb?Date.now()-L.lastHb:0;
+    if(L.lastHb&&age>35000){actBar.classList.add("show","stall");actBar.append(h("span",{class:"dot"}),h("span",{},"Claude may be stuck — no heartbeat from the bridge for "+Math.floor(age/1000)+"s"),h("span",{class:"el"},L.since?fmt(Date.now()-L.since):""));topAct.classList.add("stall");return}
+    }
+  setInterval(drawAct,1000);
+  if(isOwner){setInterval(()=>{if(!document.hidden)drawRooms()},20000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)drawRooms()})} // other rooms' unread badges don't arrive over this room's socket; poll like the lobby's build check does, skip while backgrounded
+  function status(s){const starting=s.running&&!live_.running;const stopping=!s.running&&live_.running;live_.running=!!s.running;if(s.running&&!live_.since)live_.since=Date.now();if(!s.running){live_.since=0;live_.lastTool=null;live_.route=null;live_.currentTask=null}if(starting){live_.currentTask=null}if(stopping)maybeReload();
+    if(s.running&&s.current&&!live[s.current]){const body=h("div",{class:"body cursor"});add(h("div",{class:"msg ai"},av("Claude","linear-gradient(135deg,var(--ai),#5fd3a1)"),h("div",{class:"c"},h("div",{class:"meta"},h("span",{class:"n",style:"color:var(--ai)"},"Claude"),h("span",{},ts())),body)));live[s.current]={el:body,text:""}}
+    drawAct();workEl.innerHTML=s.running?WORK:"";runPill.textContent=s.running?"working":"idle";runPill.className="pill"+(s.running?" run":"");const tp=topPill();if(tp){tp.innerHTML=runPill.innerHTML;tp.className=runPill.className}typingEl.classList.toggle("busy",!!s.running);drawTyping();queueCnt.textContent=s.queue?("queued: "+s.queue):"";stopBtn.disabled=!s.running;autoFold("Schedule",s.running&&/^sched-/.test(s.current||"")?[s.current]:[])}
+  function bridge(on){live_.bridge=on;live_.wsOpen=on!==null;drawAct();bridgePill.textContent=on===null?"reconnecting":on?"bridge online":"bridge offline";bridgePill.className="pill "+(on===null||!on?"off":"on")}
+  function drawPeople(){peopleEl.innerHTML="";const seen=new Set();const uniq=people.filter(p=>{const k=p.name+"|"+p.role;if(seen.has(k))return false;seen.add(k);return true});cnt.textContent=uniq.length;for(const p of uniq)peopleEl.append(h("div",{class:"person"},av(p.name),h("span",{class:"nm"+(p.name===name?" me":"")},p.name),typers[p.name]?h("span",{class:"dots"},h("i"),h("i"),h("i")):null,h("span",{class:"badge "+(p.role||"")},p.role||""),isOwner&&p.name!==name&&p.token?h("button",{class:"kick",title:"Remove from room",onclick:()=>{if(confirm("Boot "+p.name+" from the room?\n\nThey won't be able to rejoin with their current link."))fetch("/api/revoke/"+encodeURIComponent(p.token)+"?k="+encodeURIComponent(key),{method:"POST"}).catch(e=>toast("Failed to boot "+p.name))}},"-"):null))}
+  function drawTeam(){const sec=$("#teamSec",side);teamEl.innerHTML="";if(!agents.length&&!schedules.length){sec.style.display="none";return}sec.style.display="";teamCnt.textContent=agents.length;const callOf={};for(const [id,a] of Object.entries(agentRuns))callOf[a.type]=id;for(const a of agents){const on=callOf[a.id]!=null;teamEl.append(h("span",{class:"chip"+(on?" run":""),title:on?"Running — click to jump to its card in the transcript":(a.desc||""),onclick:on?()=>jumpTo(callOf[a.id]):()=>{inEl.value=(inEl.value?inEl.value.replace(/\s*$/," "):"")+"@"+a.id+" ";inEl.focus();grow()}},on?h("span",{class:"rdot"}):null,h("span",{class:"id"},"@"+a.id),a.name?a.name.split(" ")[0]:null))}if(schedules.length){const schNote=schedules.map(s=>"0 9 * * *"===s.when?"daily 09:00":s.when).join(", ");teamEl.append(h("span",{class:"schedBadge","data-tip":"Cron: "+schNote},"🔄 scheduled"))}}
+  function drawTyping(){const n=Object.keys(typers);typingEl.textContent="";drawPeople();if(!n.length)return;typingEl.append((n.length===1?n[0]+" is typing":n.length===2?n.join(" and ")+" are typing":n.slice(0,-1).join(", ")+" and "+n[n.length-1]+" are typing"),h("span",{class:"dots"},h("i"),h("i"),h("i")))}
+  function typing(who,on){if(typers[who]){clearTimeout(typers[who]);delete typers[who]}if(on)typers[who]=setTimeout(()=>{delete typers[who];drawTyping()},6000);drawTyping()}
+  let meTyping=false,meTimer=null;
+  function setTyping(on){if(meTimer){clearTimeout(meTimer);meTimer=null}if(on){if(!meTyping){meTyping=true;ws&&ws.readyState===1&&ws.send(JSON.stringify({type:"typing",on:true}))}meTimer=setTimeout(()=>setTyping(false),4000)}else if(meTyping){meTyping=false;ws&&ws.readyState===1&&ws.send(JSON.stringify({type:"typing",on:false}))}}
+  /* per-driver budgets: the driver's own pill (no host plan numbers reach a driver), and the owner's budget screen */
+  /* host login (owner-only): turns run as whatever Claude Code is signed into on the host machine, so an expired
+     login is fixable from here — start it, open the page it prints on any device, paste the code back. The code is
+     relayed straight to the waiting process on the host and never lands in the transcript. */
+  let authState=null;
+  function sendLogin(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));else toast("Not connected to the room")}
+  function drawAuth(a){
+    if(!isOwner)return;authState=a;authBar.innerHTML="";
+    const st=a&&a.state;if(!st||st==="in"||!["out","starting","url","checking","failed"].includes(st)){if(st==="in"&&a.email)toast("Host signed in as "+a.email+(a.plan?" ("+a.plan+")":""),4000);return}
+    const card=h("div",{class:"ab"});
+    if(st==="out")card.append(h("div",{class:"t"},"Claude Code is signed out on the host machine"),
+      h("div",{class:"d"},"Turns can't run until it's signed in again"+(a.why?" — "+a.why:"")+"."),
+      h("div",{class:"acts"},h("button",{onclick:()=>sendLogin({type:"login"})},"Sign in")));
+    else if(st==="starting")card.append(h("div",{class:"t"},"Starting the sign-in on the host…"),h("div",{class:"d"},"Waiting for the link."));
+    else if(st==="url")card.append(h("div",{class:"t"},"Finish signing in"),
+      h("div",{class:"d"},h("a",{href:a.url,target:"_blank",rel:"noopener noreferrer"},"Open the Anthropic sign-in page ↗")," — approve it, then paste the code it gives you below."),
+      (()=>{const inp=h("input",{placeholder:"paste the code here",autocomplete:"off",spellcheck:"false"});
+        const go=()=>{const v=inp.value.trim();if(!v)return;sendLogin({type:"login-code",code:v});inp.value=""};
+        inp.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();go()}});
+        return h("div",{class:"acts"},inp,h("button",{onclick:go},"Submit code"))})());
+    else if(st==="checking")card.append(h("div",{class:"t"},"Checking that code…"));
+    else if(st==="failed")card.append(h("div",{class:"t"},"Sign-in didn't complete"),a.tail?h("div",{class:"d"},a.tail):null,
+      h("div",{class:"acts"},h("button",{onclick:()=>sendLogin({type:"login"})},"Try again"),h("button",{class:"sec",onclick:()=>{authBar.innerHTML=""}},"Dismiss")));
+    authBar.append(card);
+  }
+  function drawBudget(e){
+    if(!e.limited){budgetEl.style.display="none";return}
+    const hot=e.state==="blocked"||e.state==="paused";budgetEl.style.display="";
+    budgetEl.className="budPill"+(hot?" hot":e.state==="low"||e.state==="downshift"?" warn":"");
+    budgetEl.textContent=e.state==="paused"?"budget paused":hot?"budget used up":e.leftPct==null?"budget":"budget "+e.leftPct+"% left"+(e.state==="downshift"?" · light model":"");
+    budgetEl.title=e.refillsAt?"Refills "+clk(e.refillsAt):"";
+    if(e.denied){add(h("div",{class:"sys"},e.denied==="busy"?"Not sent: your last message is still queued or running. On a budget, messages go one at a time.":e.state==="paused"?"Not sent: the owner paused your budget.":"Not sent: you've used your budget"+(e.refillsAt?". It refills "+clk(e.refillsAt)+".":".")));if(!inEl.value&&e.text){inEl.value=e.text;grow()}}
+  }
+  function openBudget(inv){
+    const t=inv.token,api="/api/invites/"+encodeURIComponent(t)+"/budget?k="+encodeURIComponent(key);let d=null,timer=null;
+    const body=h("div",{class:"bud"}),ov=h("div",{class:"budget-ov",role:"dialog"},body);
+    const esc=ev=>{if(ev.key==="Escape")close()};
+    const close=()=>{clearInterval(timer);removeEventListener("keydown",esc);ov.remove();loadInvites()};
+    const when=ts=>Date.now()-ts>20*36e5?new Date(ts).toLocaleDateString([],{weekday:"short"})+" "+new Date(ts).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):new Date(ts).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
+    const mlabel=id=>(catalog&&catModel(catalog,id)||{}).label||id||"";
+    const usd=v=>"$"+(+v||0).toFixed(2),pts=v=>(Math.round(v*10)/10)+"%";
+    const STATE={unlimited:["no limit",""],ok:["on track","ok"],low:["running low","warn"],downshift:["near limit · light model","warn"],blocked:["used up","hot"],paused:["paused","hot"],unknown:["waiting for a plan reading",""]};
+    async function load(){if(!ov.isConnected){clearInterval(timer);removeEventListener("keydown",esc);return}const sl=body.querySelector(".budRange");if(sl&&document.activeElement===sl)return;const r=await fetch(api).then(r=>r.json()).catch(()=>null);if(!ov.isConnected)return;if(!r||!r.ok){toast((r&&r.error)||"Couldn't load this budget",2500);return}d=r;render()}
+    async function save(patch){const r=await fetch(api,{method:"POST",body:JSON.stringify(patch)}).then(r=>r.json()).catch(()=>null);if(!r||!r.ok){toast((r&&r.error)||"Couldn't save",2500);return}d=r;render();toast("Saved")}
+    function render(){
+      const st=d.status,b=d.invite.budget,share=b?b.share:null;body.innerHTML="";
+      body.append(h("div",{class:"budTop"},h("button",{class:"budBack jamMini",onclick:close},"← Back"),h("div",{class:"budTitle"},h("b",{},d.invite.name||"anyone"),h("span",{class:"badge driver"},"driver"),h("span",{class:"k"},"budget · #"+room))));
+      const val=h("b",{class:"budVal"},share===null?"No limit":share===0?"Paused":share+"%");
+      const slider=h("input",{type:"range",min:"0",max:"100",step:"5",class:"budRange","aria-label":"Share of what's left on your plan"});slider.value=String(share===null?100:share);
+      slider.oninput=()=>{val.textContent=slider.value==="0"?"Paused":slider.value+"%"};slider.onchange=()=>save({share:+slider.value});
+      body.append(h("div",{class:"budSec"},h("div",{class:"budH"},"Allotment"),
+        h("div",{class:"budRow"},h("span",{class:"k"},"share of what's left on your plan"),val),slider,
+        h("div",{class:"pills"},...[["No limit",null],["Paused",0],["10%",10],["25%",25],["50%",50],["75%",75]].map(([l,v])=>h("button",{class:"chip"+(share===v?" on":""),onclick:()=>save({share:v})},l))),
+        h("p",{class:"budHelp"},"They can use this share of whatever's left in your 5-hour and weekly windows. It shrinks as your plan runs down and refills when a window resets. Your own turns are never limited.")));
+      const cb=h("input",{type:"checkbox"});cb.checked=!b||b.downshift!==false;cb.disabled=share===null||share===0;cb.onchange=()=>save({downshift:cb.checked});
+      body.append(h("label",{class:"budToggle"+(cb.disabled?" off":"")},cb,h("span",{},"At "+Math.round(100*(st.lowAt||.8))+"% of their allowance, run their turns on "+(d.lightLabel||mlabel(d.light)||"the light model"))));
+      const [sl,sc]=STATE[st.state]||[st.state,""];
+      const meters=h("div",{class:"meters budMeters"},...st.windows.map(w=>{
+        const mask=h("i",{class:"fill"}),txt=h("span",{class:"batt"}),sub=h("div",{class:"msub txt"});
+        const row=mk(w.kind==="session"?"5-hour":"weekly",txt,mask,sub,"");
+        if(w.hostLeft==null){txt.textContent="—";setFill(mask,null);sub.textContent="used "+usd(w.usd)+" · waiting for a plan reading"}
+        else if(share===null){txt.textContent="no limit";setFill(mask,null);sub.textContent="used "+usd(w.usd)+" · your plan has "+w.hostLeft+"% left"+(w.resetsAt?" · resets "+clk(w.resetsAt):"")}
+        else{txt.className="batt"+leftCls(w.leftPct);txt.textContent=w.leftPct+"% left";setFill(mask,w.leftPct);sub.textContent="allowance "+pts(w.allowance)+" of your plan (≈ "+usd(w.allowanceUsd)+") · used "+usd(w.usd)+" · your plan has "+w.hostLeft+"% left"+(w.resetsAt?" · refills "+clk(w.resetsAt):"")}
+        return row}));
+      body.append(h("div",{class:"budSec"},h("div",{class:"budH"},"Right now",h("span",{class:"bpill "+sc},sl)),meters,
+        h("p",{class:"budHelp"},(st.calibrated?"Turn cost converts to plan % at a rate learned from your plan readings.":"Turn cost converts to plan % at an estimated rate until the bridge has watched your plan move.")+(d.plan&&d.plan.ts?" Plan read "+when(d.plan.ts)+(st.stale?" (stale: the bridge hasn't read your plan since)":"")+".":""))));
+      body.append(h("div",{class:"budSec"},h("div",{class:"budH"},"Recent turns",h("span",{class:"k"},d.spends.length?String(d.spends.length):"")),
+        d.spends.length?h("div",{},...d.spends.map(x=>h("div",{class:"budTurn"},h("span",{class:"k"},when(x.ts)),h("span",{},"#"+x.room),h("span",{class:"m"},x.n>1?x.n+" turns":mlabel(x.model)),h("b",{},usd(x.cost))))):h("div",{class:"empty"},"No turns yet.")));
+      body.append(h("div",{class:"budFoot"},h("button",{class:"sbtn",onclick:()=>copy(origin+"/j/"+t)},"Copy invite link"),
+        h("button",{class:"sbtn danger",onclick:async()=>{if(!confirm("Revoke "+(d.invite.name||"this link")+"? The link stops working."))return;await fetch("/api/invites/"+encodeURIComponent(t)+"?k="+encodeURIComponent(key),{method:"DELETE"});close()}},"Revoke")));
+    }
+    root.append(ov);addEventListener("keydown",esc);body.append(h("div",{class:"empty"},"Loading…"));load();timer=setInterval(load,30000);
+  }
+  async function loadInvites(){if(!isOwner)return;const d=await fetch("/api/rooms/"+encodeURIComponent(room)+"/invites?k="+encodeURIComponent(key)).then(r=>r.json()).catch(()=>({}));invEl.innerHTML="";invCnt.textContent=(d.invites||[]).length;for(const i of d.invites||[])invEl.append(h("div",{class:"inv"},h("span",{class:"badge "+i.role},i.role),(i.role==="driver"?h("button",{class:"invName",title:"Budget for "+(i.name||"this link"),onclick:()=>openBudget(i)},i.name||"anyone"):h("span",{},i.name||"anyone")),i.budgetState?h("span",{class:"bst "+i.budgetState,title:"Budget"},i.budgetState==="paused"?"paused":i.budgetState==="blocked"?"used up":(i.budgetLeft==null?"limit":i.budgetLeft+"%")):null,h("button",{class:"cp",title:"Copy invite link",onclick:()=>copy(origin+"/j/"+i.token)},"copy link"),h("button",{class:"x",title:"Revoke",onclick:async()=>{await fetch("/api/invites/"+i.token+"?k="+encodeURIComponent(key),{method:"DELETE"});loadInvites()}},"✕")))}
+  function renameDialog(){
+    const nm=h("input",{value:room,placeholder:"room name (a-z 0-9 - _)",maxlength:"40"});const cw=h("input",{value:me.room.cwd||"",placeholder:"working directory on the host"});
+    const ov=h("div",{class:"ov",onclick:e=>{if(e.target===ov)ov.remove()}},h("div",{class:"card"},h("h2",{},"Rename #"+room),h("p",{},"Transcript, invite links, and the queue move with it. Everyone in the room is redirected. Changing the directory starts a fresh Claude session unless you carry it over."),nm,cw,
+      h("div",{class:"rowi"},h("button",{class:"btn",style:"flex:1",onclick:async()=>{const to=nm.value.trim();if(!to){nm.focus();return}const r=await fetch("/api/rooms/"+encodeURIComponent(room)+"/rename?k="+encodeURIComponent(key),{method:"POST",body:JSON.stringify({to,cwd:cw.value.trim()})}).then(r=>r.json()).catch(()=>({}));if(!r.ok){toast(r.error||"rename failed (owner key required)",3000);return}toast("Renamed → #"+r.room.name);setTimeout(()=>location.href="/r/"+encodeURIComponent(r.room.name),300)}},"Rename"),h("button",{class:"btn sec",onclick:()=>ov.remove()},"Cancel"))));
+    root.append(ov);nm.focus();nm.select()}
+  function inviteDialog(){
+    const nm=h("input",{placeholder:"Their name (optional — locks the name)",maxlength:"32"});const rl=h("select",{},h("option",{value:"driver"},"Driver — can talk to Claude"),h("option",{value:"viewer"},"Viewer — watch only"),h("option",{value:"owner"},"Owner — can approve and invite"));
+    const out=h("div",{});
+    const ov=h("div",{class:"ov",onclick:e=>{if(e.target===ov)ov.remove()}},h("div",{class:"card"},h("h2",{},"Invite to #"+room),h("p",{},"Creates a personal short link. Revoke it any time from the sidebar. Drivers' risky commands wait for your approval."),nm,rl,
+      h("div",{class:"rowi"},h("button",{class:"btn",style:"flex:1",onclick:async()=>{const r=await fetch("/api/rooms/"+encodeURIComponent(room)+"/invites?k="+encodeURIComponent(key),{method:"POST",body:JSON.stringify({name:nm.value,role:rl.value,by:name})}).then(r=>r.json());if(!r.ok){toast(r.error||"failed");return}const url=origin+"/j/"+r.token;out.innerHTML="";out.append(h("div",{class:"link"},h("span",{},url),h("button",{onclick:()=>copy(url)},"Copy")));copy(url);loadInvites()}},"Create link"),h("button",{class:"btn sec",onclick:()=>ov.remove()},"Close")),out));
+    root.append(ov);nm.focus()}
+
+  /* self-update: a newer build on the server → reload when nothing would be lost */
+  let wantBuild=null,wantSince=0;
+  // Deploys happen mid-session and a tab can stay "busy" (drafting, a turn running, an approval pending) for
+  // long stretches — with several deploys in a row, waiting for a fully idle window can defer forever and the
+  // tab is left running stale JS indefinitely (missed a real fix this way on 2026-09-10). Past 45s of knowing
+  // about a newer build, reload anyway: the backend session isn't touched by a client reload, hello replays
+  // history + any in-flight partial turn, so the only cost is a brief flash, never lost work.
+  function maybeReload(){if(!wantBuild||wantBuild===BUILD)return;if(!wantSince)wantSince=Date.now();const forced=Date.now()-wantSince>45000;if(!forced&&(inEl.value.trim()||files.length||live_.running||Object.keys(pending).length))return;toast("Updating jam…");setTimeout(()=>location.reload(),400)}
+  setInterval(maybeReload,5000);document.addEventListener("visibilitychange",()=>{if(!document.hidden){maybeReload();setSeen(room,lastM)}}); // catch this room's own badge up on whatever streamed in while backgrounded
+  /* socket */
+  function connect(){
+    ws=new WebSocket((location.protocol==="https:"?"wss":"ws")+"://"+location.host+"/ws?room="+encodeURIComponent(room)+"&k="+encodeURIComponent(key)+"&name="+encodeURIComponent(name));
+    ws.onopen=()=>{retry=0;live_.wsOpen=true;live_.lastHb=Date.now();drawAct();meTyping=false;for(const k in typers){clearTimeout(typers[k]);delete typers[k]}drawTyping()};
+    ws.onmessage=ev=>{const e=JSON.parse(ev.data);
+      if(e.type==="hello"){setSeen(room,e.msgSeq);if(e.colors)Object.assign(userColors,e.colors);if(e.build&&e.build!==BUILD){wantBuild=e.build;setTimeout(maybeReload,1500)}const wasPinned=pinned||!logWrap.children.length;for(const k in live)delete live[k];for(const k in tools)delete tools[k];const frag=document.createDocumentFragment();target=frag;pendingBar.innerHTML="";ctxApprEl.innerHTML="";pending={};agentRuns={};roomCost=+e.roomCost||0;usage=e.usage||usage;drawPlan();drawAuth(e.auth||null);if(isOwner&&e.session)roomModel=e.session.model||"auto";/* a reconnecting tab picks up a pin made elsewhere */if(e.catalog)catalog=e.catalog;try{drawModels()}catch(err){console.warn("catalog",err)}oldestSeq=null;hist.length=0;hIdx=null;draft="";ctxNow=e.ctx&&e.ctx.now||0;ctxMax=e.ctx&&e.ctx.max||0;drawBatt();drawCost();for(const x of e.log)render(x);target=null;logWrap.replaceChildren(moreBtn,frag);if(!e.log.length&&!(e.partial&&e.partial.id))logWrap.append(emptyNote);if(e.partial&&e.partial.id&&!e.log.some(x=>x.type==="done"&&x.id===e.partial.id))render({type:"delta",id:e.partial.id,text:e.partial.text||""});for(const a of e.approvals||[])render(a);autoFold("Approvals",Object.keys(pending));if(wasPinned)toBottom();status(e.status||{running:false});if(!(e.status&&e.status.running)){agentRuns={}}bridge(e.bridge);agents=e.agents||[];schedules=e.schedules||[];drawTeam();drawSchedCtx();if(e.session){sessEl.textContent="session "+e.session.id.slice(0,8)+" · "+e.session.cwd+(e.session.model?" · "+e.session.model:"");}drawQueue(e.queue||[]);haveMore=oldestSeq!==null&&oldestSeq>1;moreBtn.style.display=haveMore?"":"none";drawTitle();drawRooms();if(wasPinned)toBottom();loadInvites();return}
+      if(e.type==="status"){status(e);return}
+      if(e.type==="queue"){drawQueue(e.items||[]);return}
+      if(e.type==="route"){live_.route=e.label+" · "+e.why;drawAct();return}
+      if(e.type==="compacted"){ctxNow=e.ctx||0;if(e.ctxMax)ctxMax=e.ctxMax;drawBatt();toast("Session compacted — context "+kfmt(e.before||0)+" → "+kfmt(ctxNow));return}
+      if(e.type==="uploaded"){const w=upWaiters[e.id];if(w){delete upWaiters[e.id];w.res(e)}return}
+      if(e.type==="upload_error"){const w=upWaiters[e.id];if(w){delete upWaiters[e.id];w.rej(new Error(e.text||"upload failed"))}return}
+      if(e.type==="hb"){live_.lastHb=Date.now();if(e.since)live_.since=e.since;if(e.lastTool)live_.lastTool=e.lastTool;if(e.task)live_.currentTask=e.task;if(live_.running!==!!e.running)status({running:e.running,current:e.current,queue:e.queue});drawAct();return}
+      if(e.type==="presence"){bridge(e.bridge);people=e.users;drawPeople();return}
+      if(e.type==="typing"){typing(e.from,e.on);return}
+      if(e.type==="agents"){agents=e.list||[];drawTeam();}
+      else if(e.type==="colors"){Object.assign(userColors,e.colors||{});return}
+      else if(e.type==="schedules"){schedules=e.list||[];drawTeam();drawSchedCtx();return}
+      else if(e.type==="usage"){usage=e;drawPlan();return}
+      else if(e.type==="budget"){drawBudget(e);return}
+      else if(e.type==="auth"){drawAuth(e);return}
+      else if(e.type==="screen"){drawLive(e);return}
+      else if(e.type==="catalog"){catalog=e;try{drawModels()}catch(err){console.warn("catalog",err)}return}
+      if(e.type==="session"){sessEl.textContent="session "+e.id.slice(0,8)+" · "+e.cwd+(e.model?" · "+e.model:"");if(isOwner){roomModel=e.model||"auto";modelSel.value=roomModel;if(modelSel.value!==roomModel)drawModels();effortSel.value=e.effort||"auto";syncEffort();drawPrice()}return}
+      if(e.type==="cleared"){logWrap.innerHTML="";logWrap.append(moreBtn);moreBtn.style.display="none";roomCost=0;drawCost();add(h("div",{class:"sys"},"transcript cleared by "+e.by));return}
+      if(e.type==="moved"){ws.onclose=null;ws.close();location.href="/r/"+encodeURIComponent(e.to);return}
+      if(e.type==="gone"){ws.onclose=null;ws.close();toast("This room was deleted");setTimeout(()=>location.href="/",1200);return}
+      if(e.type==="kicked"){root.innerHTML="";root.append(h("div",{class:"ov"},h("div",{class:"card"},h("h2",{},"Access revoked"),h("p",{},"The owner revoked this invite link."))));ws.onclose=null;ws.close();return}
+      render(e)};
+    ws.onclose=()=>{bridge(null);stopBtn.disabled=true;setTimeout(connect,Math.min(1000*(2**retry++),10000))}}
+  /* attachments: paste / drop / clip → chunked base64 to the bridge → say with paths + thumbnails */
+  let files=[];const upWaiters={};
+  function addFiles(list){for(const f of list){if(f.size>25*1024*1024){toast(f.name+" is over 25MB");continue}if(files.length>=6){toast("6 files max");break}files.push(f)}drawFiles()}
+  function drawFiles(){attachEl.innerHTML="";attachEl.classList.toggle("show",files.length>0);files.forEach((f,i)=>{const c=h("div",{class:"att"});if(f.type.startsWith("image/")){const img=h("img");img.src=URL.createObjectURL(f);c.append(img)}c.append(h("span",{class:"nm"},f.name),h("button",{class:"x",onclick:()=>{files.splice(i,1);drawFiles()}},"✕"));attachEl.append(c)})}
+  const readB64=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(f)});
+  const thumb=f=>new Promise(res=>{if(!f.type.startsWith("image/"))return res(null);const img=new Image();img.onload=()=>{const k=Math.min(1,320/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.max(1,Math.round(img.width*k));c.height=Math.max(1,Math.round(img.height*k));c.getContext("2d").drawImage(img,0,0,c.width,c.height);let q=.7,d=c.toDataURL("image/jpeg",q);while(d.length>50000&&q>.2){q-=.15;d=c.toDataURL("image/jpeg",q)}res(d.length<=50000?d:null)};img.onerror=()=>res(null);img.src=URL.createObjectURL(f)});
+  async function uploadOne(f){const id=Math.random().toString(36).slice(2,12);const b64=await readB64(f);const CH=600000;const total=Math.max(1,Math.ceil(b64.length/CH));
+    const done=new Promise((res,rej)=>{upWaiters[id]={res,rej};setTimeout(()=>{if(upWaiters[id]){delete upWaiters[id];rej(new Error("upload timed out"))}},120000)});
+    for(let i=0;i<total;i++){ws.send(JSON.stringify({type:"upload",id,name:f.name,mime:f.type,seq:i,total,data:b64.slice(i*CH,(i+1)*CH)}));if(ws.bufferedAmount>4e6)await new Promise(r=>{const t=setInterval(()=>{if(ws.bufferedAmount<1e6){clearInterval(t);r()}},50)})}
+    const r=await done;return {name:f.name,path:r.path,thumb:await thumb(f)}}
+  async function send(){const t=inEl.value.trim();if((!t&&!files.length)||!ws||ws.readyState!==1)return;setTyping(false);
+    let attachments=[];if(files.length){sendBtn.disabled=true;sendBtn.textContent="Uploading…";try{for(const f of files)attachments.push(await uploadOne(f))}catch(e){toast("Upload failed: "+e.message,3000);sendBtn.disabled=false;sendBtn.textContent="Send";return}sendBtn.disabled=false;sendBtn.textContent="Send"}
+    ws.send(JSON.stringify({type:"say",text:t,attachments}));inEl.value="";files=[];drawFiles();grow();inEl.focus();hideAc();hIdx=null;draft="";histButtons()}
+  inEl.addEventListener("paste",e=>{const items=[...(e.clipboardData?.items||[])].filter(i=>i.kind==="file");if(!items.length||!canDrive)return;e.preventDefault();addFiles(items.map((i,n)=>{const f=i.getAsFile();return f&&!f.name.match(/\./)?new File([f],"pasted-"+Date.now()+"-"+n+"."+(f.type.split("/")[1]||"png"),{type:f.type}):f}).filter(Boolean))});
+  const rowEl=()=>$(".row",app);
+  ["dragenter","dragover"].forEach(ev=>document.addEventListener(ev,e=>{if(!canDrive)return;e.preventDefault();rowEl().classList.add("drop")}));
+  ["dragleave","drop"].forEach(ev=>document.addEventListener(ev,e=>{if(ev==="dragleave"&&e.relatedTarget)return;e.preventDefault();rowEl().classList.remove("drop")}));
+  document.addEventListener("drop",e=>{if(!canDrive)return;const fs=[...(e.dataTransfer?.files||[])];if(fs.length)addFiles(fs)});
+  const grow=()=>{inEl.style.height="auto";inEl.style.height=Math.min(inEl.scrollHeight,220)+"px"};
+  /* @mention autocomplete */
+  let acItems=[],acSel=0;
+  function hideAc(){ac.style.display="none";acItems=[]}
+  function showAc(){const v=inEl.value.slice(0,inEl.selectionStart);const m=/(^|\s)@([a-z0-9_-]*)$/i.exec(v);if(!m){hideAc();return}
+    const q=m[2].toLowerCase();acItems=[...agents.map(a=>({id:a.id,d:a.name||a.desc||""})),...people.filter(p=>p.name!==name).map(p=>({id:p.name,d:"person"}))].filter(x=>x.id.toLowerCase().startsWith(q)).slice(0,8);
+    if(!acItems.length){hideAc();return}acSel=0;ac.innerHTML="";acItems.forEach((x,i)=>ac.append(h("div",{class:i===acSel?"sel":"",onmousedown:e=>{e.preventDefault();pick(i)}},h("span",{class:"id"},"@"+x.id),h("span",{class:"d"},x.d))));ac.style.display="block"}
+  function pick(i){const x=acItems[i];if(!x)return;const pos=inEl.selectionStart;const before=inEl.value.slice(0,pos).replace(/@[a-z0-9_-]*$/i,"@"+x.id+" ");inEl.value=before+inEl.value.slice(pos);inEl.selectionStart=inEl.selectionEnd=before.length;hideAc();grow()}
+  inEl.addEventListener("keydown",e=>{if(ac.style.display==="block"){if(e.key==="ArrowDown"||e.key==="ArrowUp"){e.preventDefault();acSel=(acSel+(e.key==="ArrowDown"?1:acItems.length-1))%acItems.length;[...ac.children].forEach((c,i)=>c.className=i===acSel?"sel":"");return}if(e.key==="Enter"||e.key==="Tab"){e.preventDefault();pick(acSel);return}if(e.key==="Escape"){hideAc();return}}
+    if(e.key==="ArrowUp"&&hist.length){const before=inEl.value.slice(0,inEl.selectionStart);if(!before.includes("\n")){e.preventDefault();histNav(-1)}return}
+    if(e.key==="ArrowDown"&&hIdx!==null){const after=inEl.value.slice(inEl.selectionEnd);if(!after.includes("\n")){e.preventDefault();histNav(1)}return}
+    if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
+  inEl.addEventListener("input",()=>{if(hIdx!==null){hIdx=null;histButtons()}grow();setTyping(inEl.value.trim().length>0);showAc()});
+  inEl.addEventListener("blur",()=>setTimeout(hideAc,120));
+  connect();
+}
+})();
+</script></body></html>
