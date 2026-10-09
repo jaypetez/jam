@@ -115,7 +115,7 @@ included; Task Scheduler works).
 ## Links
 
 | Link | Who | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `/?k=<owner key>` | you | Lobby: create/delete rooms. Key is stored in a cookie after the first visit. |
 | `/r/<room>` | you | Room as owner (cookie), or `/r/<room>?k=<owner key>` once |
 | `/j/<token>` | invitees | Personal short link; role and optional fixed name baked in |
