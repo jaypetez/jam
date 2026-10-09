@@ -131,11 +131,14 @@ function classify(tool, input) {
 
   // realpathSync canonicalizes case on macOS's default case-insensitive-but-preserving APFS volume, so this
   // comparison is correct on both case-sensitive and case-insensitive filesystems without manual lower-casing.
+  // Windows (2026-10-09 review): realpath returns backslash paths, so every "/" prefix and (^|\/) pattern below never matched and
+  // inside-workdir was never true. Normalise to "/" there; a no-op on POSIX, where a backslash is an ordinary filename character.
+  const fwd = (p) => path.sep === "\\" ? String(p).replace(/\\/g, "/") : String(p);
   const isInsideWorkdir = (fp) => {
     if (!fp) return false;
-    const real = resolveReal(fp);
-    const prefix = cwdReal.replace(/\/$/, "") + "/";
-    return real === cwdReal || real.startsWith(prefix);
+    const real = fwd(resolveReal(fp)), cw = fwd(cwdReal);
+    const prefix = cw.replace(/\/$/, "") + "/";
+    return real === cw || real.startsWith(prefix);
   };
   // Case-insensitive (`i` flag): a case-sensitive blocklist is trivially evaded on macOS's default
   // case-insensitive APFS volume, e.g. Read "/Users/mike/.SSH/ID_RSA" resolves to the same file as
@@ -143,16 +146,16 @@ function classify(tool, input) {
   // Also protects the hook's own source (SELF_PATH, matched separately below) is not enough on its own —
   // this list additionally names bridge.mjs and the .jam state dir so a driver whose JAM_CWD happens to be
   // (or contain) the jam repo can't disarm the sandbox by editing its control files.
+  const SENSITIVE_RE = /(^|\/)(\.env|\.jam-key|\.ssh|\.aws|\.config|Library|\.claude(\/|$)|\.zshrc|\.bashrc|\.profile|\.gitconfig|id_rsa|\.npmrc|\.git(\/|$)|approve-hook\.mjs|bridge\.mjs|nightly\.sh|check\.sh|run-tests\.sh|test-sandbox\.mjs|\.jam(\/|$))/i;
   const isSensitive = (fp) => {
     const real = resolveReal(fp);
     if (real === selfReal) return true; // the hook can never be self-writable, full stop
-    return /(^|\/)(\.env|\.jam-key|\.ssh|\.aws|\.config|Library|\.claude(\/|$)|\.zshrc|\.bashrc|\.profile|\.gitconfig|id_rsa|\.npmrc|\.git(\/|$)|approve-hook\.mjs|bridge\.mjs|nightly\.sh|check\.sh|run-tests\.sh|test-sandbox\.mjs|\.jam(\/|$))/i.test(real)
-        || /(^|\/)(\.env|\.jam-key|\.ssh|\.aws|\.config|Library|\.claude(\/|$)|\.zshrc|\.bashrc|\.profile|\.gitconfig|id_rsa|\.npmrc|\.git(\/|$)|approve-hook\.mjs|bridge\.mjs|nightly\.sh|check\.sh|run-tests\.sh|test-sandbox\.mjs|\.jam(\/|$))/i.test(String(fp || ""));
+    return SENSITIVE_RE.test(fwd(real)) || SENSITIVE_RE.test(fwd(fp || "")); // tested on both the resolved and the literal path
   };
 
   // Files the owner's next claude/git/editor run would load with owner rights. The Bash profile denies these; this covers the in-process
   // Write/Edit tools (the profile can't reach them).
-  const isPlant = (fp) => /(^|\/)(\.claude[^/]*|CLAUDE[^/]*\.md|\.mcp\.json|\.envrc|\.gitmodules|\.gitattributes|\.vscode)(\/|$)/i.test(resolveReal(fp));
+  const isPlant = (fp) => /(^|\/)(\.claude[^/]*|CLAUDE[^/]*\.md|\.mcp\.json|\.envrc|\.gitmodules|\.gitattributes|\.vscode)(\/|$)/i.test(fwd(resolveReal(fp)));
   // Default-deny: all tools except Owner calls are risky unless explicitly allowed below
   if (tool === "Bash") {
     const c = String(input.command || "");

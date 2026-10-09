@@ -9,7 +9,8 @@
   "scripts": {
     "build": "./build.sh",
     "deploy": "./deploy.sh",
-    "start": "./run.sh"
+    "start": "./run.sh",
+    "test": "./check.sh"
   },
   "license": "MIT",
   "engines": {

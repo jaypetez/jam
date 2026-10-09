@@ -603,6 +603,8 @@ function runOne(r, item) {
   item.startedAt = Date.now(); item.model = model; item.tier = auto ? pick.tier : "manual"; item.score = auto ? pick.score : null;
   const env = { ...process.env, CLAUDECODE: undefined, JAM_HOST: host, JAM_KEY: key, JAM_ROOM: r.cfg.name, JAM_FROM: item.from, JAM_FROM_ROLE: item.role || "driver", JAM_TURN: item.id, JAM_CWD: r.cfg.cwd };
   delete env.JAM_RUN_LOCAL; // never inherited: the hook's only source for "the owner trusts drivers' commands in this room" is the line below
+  // 2026-10-09 review: only the Seatbelt path (sandbox.mjs) used to scrub JAM_KEY, so off-macOS or with JAM_DRIVER_SANDBOX=off a driver's claude ran with the hub key in its env (readable by any same-uid process). The hook reads .jam-key from disk, so drop it for every driver turn.
+  if (item.role === "driver" && existsSync(path.join(here, ".jam-key"))) delete env.JAM_KEY;
   let sb = null, sbErr = "";
   if (item.role === "driver") { try { sb = wrapDriver(r.cfg.cwd, item.id, env); } catch (e) { sbErr = e.message; log(`#${r.cfg.name}`, "driver sandbox failed:", e.message); } }
   // "Run commands on this machine": card-free driver Bash. Only with the Seatbelt actually applied (sb) -- with JAM_DRIVER_SANDBOX=off
@@ -915,7 +917,9 @@ function handleBrowserClick(r, m) {
 const uploads = new Map(); // id -> { name, chunks, total, room }
 function handleUpload(r, m) {
   let u = uploads.get(m.id);
-  if (!u) { u = { name: m.name, chunks: new Array(m.total), total: m.total, got: 0, t: Date.now() }; uploads.set(m.id, u); }
+  // 2026-10-09 review: m.total came straight off the wire into new Array(), so a huge value allocated before the 25MB check ran. Bound count and chunk size up front (25MB of base64 is ~34MB).
+  if (!u) { if (!Number.isInteger(m.total) || m.total < 1 || m.total > 4096) return r.send({ type: "upload_error", id: m.id, text: "bad upload" }); u = { name: m.name, chunks: new Array(m.total), total: m.total, got: 0, t: Date.now() }; uploads.set(m.id, u); }
+  if (typeof m.data !== "string" || m.data.length > 4 * 1024 * 1024) { uploads.delete(m.id); return r.send({ type: "upload_error", id: m.id, text: "upload chunk too large" }); }
   if (m.seq < 0 || m.seq >= u.total || u.chunks[m.seq] != null) return;
   u.chunks[m.seq] = m.data; u.got++;
   if (u.got < u.total) return;
