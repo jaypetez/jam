@@ -6,6 +6,8 @@ Worker only changes when its owner runs `./deploy.sh`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-09
+
 ### Added
 
 - **A self-contained dev loop.** `npm run dev` starts the real Worker on workerd (real Durable Objects), a real bridge and a deterministic fake `claude`
@@ -20,6 +22,8 @@ Worker only changes when its owner runs `./deploy.sh`.
 
 - `bridge.mjs`: `JAM_CLAUDE` may name a `.js/.mjs/.cjs` script, run with the bridge's own node (no shebang, exec bit or Windows shim needed).
 - `deploy.yml` uses Node 22 (the bridge needs the global `WebSocket`).
+- `wrangler` is now a dev dependency (it bundles workerd); only the local loop uses it. Nothing deploys from `npm run dev` or `npm run e2e`.
+- A GitHub Actions `deploy.yml` (from PR #2) deploys on push to `main` behind a `production` environment approval. It cannot deploy until that environment and its secrets exist, and it does not yet wait for running turns to go idle.
 
 ### Fixed
 
@@ -65,5 +69,6 @@ Worker only changes when its owner runs `./deploy.sh`.
 
 Earlier history is in the git log.
 
-[Unreleased]: https://github.com/jaypetez/jam/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jaypetez/jam/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jaypetez/jam/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jaypetez/jam/releases/tag/v0.3.0
