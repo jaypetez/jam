@@ -6,6 +6,12 @@ Worker only changes when its owner runs `./deploy.sh`.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-15
+
+### Changed
+
+- Dependency updates from Dependabot: `playwright` 1.63 to 1.64 (npm, used by the bridge's browser helper), and the `actions/checkout` and `actions/setup-node` pins in `deploy.yml` moved to their current releases.
+
 ## [0.4.0] - 2026-10-09
 
 ### Added
@@ -69,6 +75,7 @@ Worker only changes when its owner runs `./deploy.sh`.
 
 Earlier history is in the git log.
 
-[Unreleased]: https://github.com/jaypetez/jam/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jaypetez/jam/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/jaypetez/jam/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/jaypetez/jam/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jaypetez/jam/releases/tag/v0.3.0
