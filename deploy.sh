@@ -5,7 +5,7 @@ set -e; cd "$(dirname "$0")"; ./build.sh
 [ -f .jam-key ] || { openssl rand -hex 24 > .jam-key; echo "generated .jam-key"; }
 JK=$(cat .jam-key)
 MIG=""; if [ -n "$JAM_MIGRATION" ]; then MIG=",\"migrations\":$JAM_MIGRATION"; fi
-META=$(printf '{"main_module":"worker.js","compatibility_date":"2025-06-01","bindings":[{"type":"durable_object_namespace","name":"ROOM","class_name":"Room"},{"type":"durable_object_namespace","name":"HUB","class_name":"Hub"},{"type":"secret_text","name":"JAM_KEY","text":"%s"}]%s}' "$JK" "$MIG")
+META=$(printf '{"main_module":"worker.js","compatibility_date":"2025-06-01","bindings":[{"type":"durable_object_namespace","name":"ROOM","class_name":"Room"},{"type":"durable_object_namespace","name":"HUB","class_name":"Hub"},{"type":"durable_object_namespace","name":"REGISTRY","class_name":"Registry"},{"type":"secret_text","name":"JAM_KEY","text":"%s"}]%s}' "$JK" "$MIG")
 # Pre-upload bundle gate (validate-worker-bundle.cjs, vendored locally so jam deploys standalone — .cjs because jam's
 # package.json is "type":"module" and the gate script is plain CommonJS) on the built worker.js against the same
 # metadata the API path uploads (wrangler.toml declares the same DO bindings). Refuses on a parse error, a leaked
@@ -51,7 +51,7 @@ sys.exit(79 if any(e.get('code') == 10079 for e in (d.get('errors') or [])) else
 " || RC=$?   # `|| RC=$?` so set -e cannot skip the retry/fail handling below
   if [ "$RC" -eq 79 ] && [ -n "$MIG" ]; then
     echo "  DO classes already exist — retrying deploy without the migration payload…"
-    META_RETRY=$(printf '{"main_module":"worker.js","compatibility_date":"2025-06-01","bindings":[{"type":"durable_object_namespace","name":"ROOM","class_name":"Room"},{"type":"durable_object_namespace","name":"HUB","class_name":"Hub"},{"type":"secret_text","name":"JAM_KEY","text":"%s"}]}' "$JK")
+    META_RETRY=$(printf '{"main_module":"worker.js","compatibility_date":"2025-06-01","bindings":[{"type":"durable_object_namespace","name":"ROOM","class_name":"Room"},{"type":"durable_object_namespace","name":"HUB","class_name":"Hub"},{"type":"durable_object_namespace","name":"REGISTRY","class_name":"Registry"},{"type":"secret_text","name":"JAM_KEY","text":"%s"}]}' "$JK")
     RESP=$(put_worker "$META_RETRY")
     printf '%s' "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print('deploy success', d['success'], d.get('errors') or ''); sys.exit(0 if d['success'] else 1)" || { echo "DEPLOY FAILED — worker was not updated." >&2; exit 1; }
   elif [ "$RC" -ne 0 ]; then
@@ -63,7 +63,9 @@ fi
 if [ -n "$JAM_HOST" ]; then
   echo "verifying build hash at $JAM_HOST…"
   sleep 2
-  for i in {1..10}; do LIVE_HASH=$(curl -s "https://$JAM_HOST/health" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('build',''))" 2>/dev/null || echo ""); [ "$LIVE_HASH" = "$EXPECTED_HASH" ] && { echo "✓ hash verified: $LIVE_HASH"; exit 0; }; [ $i -lt 10 ] && sleep 2; done
+  # the bridge bundle (/dl/jam.tgz) has its own hash: a bridge-only change leaves BUILD unchanged, so verify both
+  EXPECTED_HASH="$EXPECTED_HASH:$(grep -o 'const TGZ_BUILD="[0-9a-f]*"' worker.js | head -1 | cut -d'"' -f2)"
+  for i in {1..10}; do LIVE_HASH=$(curl -s "https://$JAM_HOST/health" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('build','')+':'+(d.get('bridge') or ''))" 2>/dev/null || echo ""); [ "$LIVE_HASH" = "$EXPECTED_HASH" ] && { echo "✓ hash verified: $LIVE_HASH"; exit 0; }; [ $i -lt 10 ] && sleep 2; done
   echo "✗ build hash mismatch: expected $EXPECTED_HASH, got $LIVE_HASH (deploy may have failed or not yet propagated)" >&2
   exit 1
 else

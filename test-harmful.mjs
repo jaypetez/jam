@@ -46,7 +46,9 @@ if (process.platform === "darwin") {
   const f = run("for i in {1..2000}; do sleep 3 & done; echo spawned-all");
   ok(f.status !== 0 && !/spawned-all/.test(f.stdout) && /fork failed|resource temporarily unavailable/i.test(f.stderr), "sandbox: process cap stops a fork bomb");
   ok(/^\d+$/.test(run("ulimit -f").stdout.trim()) && /^\d+$/.test(run("ulimit -H -f").stdout.trim()), "sandbox: file-size cap is set, hard");
-  ok(run("ulimit -f unlimited; ulimit -u 100000; ulimit -f; ulimit -u").stdout.trim() === [run("ulimit -f").stdout.trim(), run("ulimit -u").stdout.trim()].join("\n"), "sandbox: the command can't raise its own caps back");
+  // compared within ONE run: bashwrap sizes the process cap from the uid's live process count, so two separate runs can
+  // legitimately differ (1000 vs 1005) — comparing across runs flaked ~50% (2026-10-15)
+  ok(run('a=$(ulimit -u); b=$(ulimit -f); ulimit -f unlimited; ulimit -u 100000; [ "$(ulimit -u)" = "$a" ] && [ "$(ulimit -f)" = "$b" ] && echo SAME').stdout.trim() === "SAME", "sandbox: the command can't raise its own caps back");
   const mt = run("a=$(mktemp) && b=$(mktemp -d) && c=$(mktemp -t foo) && echo x > $a && cat $a && echo $a $b $c");
   ok(mt.status === 0 && mt.stdout.split(/\s+/).filter(x => x.startsWith("/")).every(x => x.startsWith(sb.scratch)), "sandbox: bare mktemp / mktemp -d / -t land in scratch and work");
   ok(run("cat <<EOF\nhello\nEOF").stdout.trim() === "hello", "sandbox: heredocs work");

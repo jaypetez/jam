@@ -41,13 +41,13 @@ ok("tool event has callId+input",!!toolEv.input?.command,toolEv.summary);ok("too
 await wait(owner,e=>e.type==="done",120000);
 // 8. driver non-risky command runs without approval
 let apr=false;const w=wait(owner,e=>e.type==="approval",8000).then(()=>apr=true).catch(()=>{});
-driver.send(JSON.stringify({type:"say",text:"Use Bash to run: ls /tmp/jamtest. Reply with the word OK."}));const d3=await wait(driver,e=>e.type==="done"||e.type==="error",120000);await w;ok("driver harmless command needs no approval",!apr&&d3.type==="done");
+driver.send(JSON.stringify({type:"say",text:"Use Bash to run: ls /tmp/jamtest. Reply with the word OK."}));const d3=await wait(driver,e=>e.type==="error"||(e.type==="done"&&/\bok\b/i.test(e.text||"")),120000).catch(()=>({type:"timeout"}));await w;ok("driver harmless command needs no approval",!apr&&d3.type==="done");
 // 8b. queue + cancel: two quick messages → second is queued → cancel it → it never runs
 {const qEv=[];const qh=ev=>{const e=JSON.parse(ev.data);if(e.type==="queue")qEv.push(e.items)};owner.addEventListener("message",qh);
  owner.send(JSON.stringify({type:"say",text:"Reply with the word FIRST only."}));owner.send(JSON.stringify({type:"say",text:"Reply with the word SECOND only."}));
  await new Promise(r=>setTimeout(r,1500));const queued=qEv.flat().find(i=>/SECOND/.test(i.text));ok("second message shows as queued",!!queued,JSON.stringify(qEv.at(-1)));
  if(queued)owner.send(JSON.stringify({type:"unqueue",id:queued.id}));
- const f=await wait(owner,e=>e.type==="done",120000);ok("first turn completes",/FIRST/i.test(f.text||""),(f.text||"").slice(0,30));
+ const f=await wait(owner,e=>e.type==="done"&&/FIRST|SECOND/i.test(e.text||""),120000).catch(()=>({}));ok("first turn completes",/FIRST/i.test(f.text||""),(f.text||"").slice(0,30));
  let second=false;await wait(owner,e=>e.type==="done"&&/SECOND/i.test(e.text||""),8000).then(()=>second=true).catch(()=>{});ok("cancelled message never ran",!second);owner.removeEventListener("message",qh)}
 // 8a. room names are unique: creating an existing name is rejected, settings route updates instead
 {const dup=await j(`/api/rooms?k=${K}`,{method:"POST",body:JSON.stringify({name:room.toUpperCase(),cwd:"/tmp/elsewhere"})});ok("duplicate room name rejected (case-insensitive)",!dup.ok&&/exists/.test(dup.error||""),JSON.stringify(dup));

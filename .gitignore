@@ -9,6 +9,7 @@ logs/
 node_modules/
 .wrangler/
 ui.html.bak
+jam.tgz
 
 # OS
 .DS_Store

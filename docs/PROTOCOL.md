@@ -54,7 +54,9 @@ Close codes: `4001` revoked invite, `4002` room moved or deleted, `1012` service
 | `tool`, `tool_result` | `id`, `callId`, ... | Tool cards. `tool` carries a raw `summary` for the expandable card and a sanitized `label` for the status bar. |
 | `done`, `error` | `id`, `text`, `cost?`, `ctx?`, `ctxMax?`, `model?`, `tier?`, `roomCost?` | End of a turn. `roomCost` is on the live frame only. |
 | `route` | `id`, `tier`, `label`, `why`, `score` | Which model the router picked, and why. |
-| `session` | `id`, `cwd`, `model`, `tier`, `effort`, `runLocal` | |
+| `session` | `id`, `cwd`, `model`, `tier`, `effort`, `runLocal`, `marathon` | `marathon` is `auto`, `full` or `off` (null if the bridge can't read its state). |
+| `commands` | `list[]`, `terminal[]` | Slash commands the host's Claude Code knows; `terminal` ones need a real terminal. In memory only, owners use them. |
+| `reload` | | Your invite's role changed: reload to reconnect with it. The socket then closes with 4004. |
 | `approval` | `id`, `from`, `tool`, `summary`, `detail`, `state`, `by?` | An Allow/Deny card for the owner. |
 | `budget` | driver view of a share of the host plan, `denied?`, `text?` | Sent to that driver only. |
 | `sys` | `text`, `ts` | A line in the transcript. |
@@ -89,6 +91,7 @@ A driver's `say` is checked against their budget first. A limited driver gets on
 | `type` | Effect |
 | --- | --- |
 | `hb`, `sync` | Heartbeat and a full status resync. |
+| `commands` | The host's slash-command list, re-broadcast (not stored). |
 | `start`, `delta`, `tool`, `tool_result`, `done`, `error` | The turn stream. `done` and `error` are stored in the log and drop the message from the outbox. |
 | `spend` | A cost to charge to the driver who sent message `id` (every attempt, including retries and `/compact`). `final` ends the charge. |
 | `session`, `route`, `compacted`, `uploaded`, `upload_error` | Re-broadcast to browsers. |
@@ -101,8 +104,9 @@ A driver's `say` is checked against their budget first. A limited driver gets on
 ## Room socket: server → bridge
 
 `say` (the queued message, with `role` and an optional `budget: "downshift"` flag that browsers never see), `upload` chunks, `unqueue`,
-`stop`, `browser-click`, `login`, `login-code`, `refresh`. On every (re)connect the Room replays its outbox; the bridge de-duplicates by
-message id.
+`stop`, `browser-click`, `login`, `login-code`, `refresh`, and `demote` (`ids[]`, `role`: an invite was demoted or revoked, so the bridge
+re-roles or drops that sender's queued, paused and running work; never raises rights). On every (re)connect the Room re-sends the last 20
+`demote`s (7 days), then replays its outbox; the bridge de-duplicates by message id.
 
 ## Hub socket
 
@@ -123,7 +127,10 @@ Owner key or an owner invite (scoped, see above) unless noted. Paths are under `
 
 | Method and path | Notes |
 | --- | --- |
-| `GET /health` | Public. `{ok, t, build}`. |
+| `GET /health` | Public. `{ok, t, build, bridge}`; `bridge` is the hash of the host bundle. |
+| `GET /dl/jam.tgz` | Public. The host bundle (bridge, hook, `claim.mjs`), an explicit allowlist built by `mktgz.py`. |
+| `POST /api/claim` | Public. `{code, tenant, hash}`: a one-time host code, a host name and sha256 of a secret made on the claimer's machine. |
+| `GET /api/hosts`, `POST /api/hosts/codes`, `DELETE /api/hosts/codes/<c>`, `POST /api/hosts/<h>/disable`, `DELETE /api/hosts/<h>` | Root owner key only. Host admin; delete only when disabled (wipes its rooms). |
 | `GET /api/whoami` | `{role, name, room}` for any valid credential. |
 | `GET /my-accessible-rooms` | Rooms the credential can open. Not under `/api`. |
 | `GET /api/sponsor` | Public. `POST` is owner only. |
@@ -133,6 +140,7 @@ Owner key or an owner invite (scoped, see above) unless noted. Paths are under `
 | `POST /api/rooms/<r>/rename` | `{to, cwd?}`. Copies the transcript to a new Room DO, then wipes the old one. |
 | `DELETE /api/rooms/<r>` | Also wipes the transcript and drops the room's invites. |
 | `GET/POST /api/rooms/<r>/invites` | Create takes `role`, `name`; an unknown role becomes `driver`. |
+| `POST /api/rooms/<r>/invites/<t>` | `{role}`: change an invite's role in place. Host owner key only (an owner-by-invite gets 403). Open tabs reload; a demotion also reaches the sender's pending work (`demote`). |
 | `DELETE /api/invites/<t>` | Removes the invite and kicks live sockets. |
 | `POST /api/revoke/<t>` | Durable revocation first, then a best-effort kick. |
 | `GET/POST /api/invites/<t>/budget` | Driver invites only. `share` is 0 to 100, or `null` for no limit. |

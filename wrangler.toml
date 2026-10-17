@@ -6,11 +6,16 @@ compatibility_date = "2025-06-01"
 bindings = [
   { name = "ROOM", class_name = "Room" },
   { name = "HUB",  class_name = "Hub"  },
+  { name = "REGISTRY", class_name = "Registry" },
 ]
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room", "Hub"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Registry"]   # host registry: hosted tenants who run their own bridge (claim.mjs)
 
 # Custom domain (optional):
 # routes = [{ pattern = "jam.example.com", custom_domain = true }]

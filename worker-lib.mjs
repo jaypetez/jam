@@ -7,7 +7,7 @@ export const ROLES = new Set(["owner", "driver", "viewer"]);
 export const TIERS = new Set(["light", "medium", "heavy"]); // room-level ROUTING weight override for the auto-router (which model runs); "auto" (unset) lets it score each message itself. NOT Anthropic effort — see EFFORT_LEVELS.
 export const EFFORT_LEVELS = new Set(["auto", "low", "medium", "high", "xhigh", "max"]); // Anthropic's real --effort levels (how hard the chosen model thinks); "auto" omits the flag
 export const TOKEN_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789"; // no 0/o/1/l, link-friendly
-export const ABS_CWD_MSG = "cwd must be an absolute path (e.g. /Users/you/project or C:\\Users\\you\\project), not a description or a relative path";
+export const ABS_CWD_MSG = "cwd must be an absolute path (e.g. /Users/you/project, ~/project or C:\\Users\\you\\project), not a description or a relative path";
 
 // a catalog comes from a bridge socket (any owner key can open one): keep only well-formed fields, so a bad payload
 // can't be stored and break every room page on load
@@ -28,7 +28,7 @@ export function cleanPlan(m) {
   return limits.length ? { limits, rate: { session: num(m.rate?.session), weekly: num(m.rate?.weekly) }, calibrated: !!(num(m.rate?.session) || num(m.rate?.weekly)), ts: Number.isFinite(m.ts) ? m.ts : Date.now() } : null;
 }
 export const roomName = s => String(s || "").replace(/[^a-z0-9_-]/gi, "").toLowerCase().slice(0, 40);
-export const isAbsCwd = s => /^\//.test(s) || /^[A-Za-z]:[\\/]/.test(s); // POSIX (/…) or Windows (C:\… or C:/…) absolute path
+export const isAbsCwd = s => /^\//.test(s) || /^[A-Za-z]:[\\/]/.test(s) || /^~(?:[\\/]|$)/.test(s); // POSIX (/…), Windows (C:\… or C:/…) or ~ / ~/… (the bridge expands ~ against the host's home — the hub can't know it)
 export function token(n = 12) { const b = crypto.getRandomValues(new Uint8Array(n)); let s = ""; for (const x of b) s += TOKEN_ALPHABET[x % 32]; return s; }
 export function safeEq(a, b) { if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false; let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i); return r === 0; }
 

@@ -9,12 +9,12 @@ const mod = await import("./worker.js"); const worker = mod.default;
 let fail = 0; const ok = (c, m, extra = "") => { if (!c) { fail++; console.log("FAIL " + m + " " + extra); } else console.log("PASS " + m); };
 
 const store = new Map();
-const state = { storage: { get: async k => store.get(k), put: async (k, v) => { store.set(k, structuredClone(v)); }, delete: async k => store.delete(k), list: async () => new Map(store) }, getWebSockets: () => [], acceptWebSocket() {} };
+const state = { id: { equals: x => x === "hub" }, storage: { get: async k => store.get(k), put: async (k, v) => { store.set(k, structuredClone(v)); }, delete: async k => store.delete(k), list: async () => new Map(store) }, getWebSockets: () => [], acceptWebSocket() {} };
 const roomCalls = [];
 const asReq = (u, init) => typeof u === "string" ? new Request(u, init) : u;
 const roomStub = { fetch: async (u, init) => { const r = asReq(u, init); const url = new URL(r.url); const body = r.method === "POST" ? await r.text() : ""; roomCalls.push({ path: url.pathname, method: r.method, body }); return url.pathname === "/dump" ? Response.json({ entries: [1, 2, 3] }) : Response.json({ ok: true }); } };
 const hub = new mod.Hub(state, {});
-const env = { JAM_KEY: "owner-key-123", HUB: { idFromName: n => n, get: () => ({ fetch: (u, init) => hub.fetch(asReq(u, init)) }) }, ROOM: { idFromName: n => n, get: () => roomStub } };
+const env = { JAM_KEY: "owner-key-123", HUB: { idFromName: n => n, get: () => ({ fetch: (u, init) => hub.fetch(asReq(u, init)) }) }, ROOM: { idFromName: n => n, get: () => roomStub }, REGISTRY: { idFromName: n => n, get: () => ({ fetch: async () => Response.json({ ok: false }) }) } }; // REGISTRY: hosted tenants; no tenant exists here, so every check says no
 hub.env = env;
 
 const call = async (path, { method = "GET", body, key = env.JAM_KEY, headers = {} } = {}) => {
