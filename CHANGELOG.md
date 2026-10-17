@@ -6,6 +6,49 @@ Worker only changes when its owner runs `./deploy.sh`.
 
 ## [Unreleased]
 
+Synced from the Null Agency deployment (jam.nullagency.io), 2026-10-09 to 2026-10-16.
+
+### Added
+
+- **Hosts.** Other people run rooms on their own Claude against a hosted hub: the root owner mints a one-time host code in the lobby's Hosts
+  panel; `curl /dl/jam.tgz | tar xz && node claim.mjs <code> <name> && ./run.sh` sets a machine up (the key never leaves it). Each host gets its own
+  Hub and Rooms (`t:<host>`, derived only in `hubId`/`roomId`/`registryId`; check.sh gates it), a 20-room cap, disable (kicks every socket) and
+  delete. A host's guests must run on `JAM_DRIVER_API_KEY` (Anthropic's consumer terms don't allow sharing a subscription). New `Registry` DO.
+- **Marathon mode** (`marathon.mjs`). Owner turns are no longer killed at 10 minutes: they're cut at 10 min of silence or a 45-min checkpoint
+  and continue from the session. A turn that ends with `MARATHON-CONTINUE <nonce>` continues (12 unattended turns max, reset when an owner
+  posts); `/marathon on` keeps going until `MARATHON-DONE`; `/marathon off` restores the 10-minute kill. Pauses at 2% plan left, resumes at 10%
+  (checked every 15 min). Guests are never continued. Owner switch in the Turn panel.
+- **Invite roles editable in place**: the role badge on each invite row is a dropdown for the host owner. Tabs reload with the new role; a
+  demotion or revoke re-roles or drops that person's queued, paused and running work (`demote`).
+- Owner slash commands run for real (`/name …` goes to Claude Code raw), with autocomplete in the composer. Terminal-only commands run in a
+  throwaway pty (`termcmd.py`) when "Run commands on this machine" is on.
+- A copy button under every message (fenced code copies only the code).
+- `~` and `~/path` are accepted as a room directory (the bridge expands them against the host's home).
+
+### Changed
+
+- The bridge's self-restart watch list is derived from its own import lines (marathon.mjs was missed by the hand-written one); check.sh
+  verifies the derivation instead of the list.
+- A killed first turn that already wrote a transcript resumes it next turn instead of abandoning the session (`decideNoResult` gets `resumable`).
+- Sockets that never open back off 3 s → 60 s instead of retrying every 3 s.
+
+### Fixed
+
+- **Room state survived no Durable Object eviction**: an inline `//` comment in `Room.load()` swallowed the restore of schedules, usage, auth,
+  catalog, ctx and session, and the next save made the loss permanent (all six are bridge mirrors, re-sent on reconnect). `saveMeta()` and
+  `load()` now walk one list (`ROOM_MIRRORS`), and `room-meta.test.mjs` round-trips every field through a fresh Room.
+- A hung compaction in a marathon room was never killed (the marathon watchdog skips compactions); it gets the classic 10-minute kill again.
+- check.sh hid a crashing `test-worker-hub.mjs` behind `| tail` (its fake Hub now has `state.id` and a `REGISTRY` stub); `pipefail` is on for
+  the test section. The termcmd steps are skipped on Windows Git Bash.
+- `deploy.sh` verifies the bridge bundle hash (`/health` `bridge`) as well as `build`, so a bridge-only change can't pass unpropagated.
+- check.sh parses under macOS's stock bash 3.2 (a `case` inside `$( )` needs `(pattern)`); test-sandbox-exec's spawn check matches `claudeCmd`.
+
+### Upgrading
+
+- The `Registry` Durable Object is new. Wrangler deploys pick up the `v2` migration from `wrangler.toml`; an existing install deploying through
+  the API path (`deploy.sh` without wrangler) must pass it once:
+  `JAM_MIGRATION='{"old_tag":"v1","new_tag":"v2","new_sqlite_classes":["Registry"]}' ./deploy.sh`.
+
 ## [0.4.1] - 2026-10-15
 
 ### Changed

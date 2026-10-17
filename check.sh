@@ -15,7 +15,7 @@ EXEC_FILES=$(
   { git ls-files -s | awk -F'\t' '$1 ~ /^100755 /{print $2}'
     grep -hoE '\./[A-Za-z0-9_][A-Za-z0-9_.-]*\.(sh|mjs|cjs|js)' *.sh package.json .github/workflows/*.yml 2>/dev/null | sed 's|^\./||'
     # (C) is skipped on Windows: Git Bash reports every file as -x there, so it would flag every 100644 file with a shebang (e.g. auth.test.mjs).
-    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) git ls-files | while IFS= read -r t; do [ -f "$t" ] && [ -x "$t" ] && printf '%s\n' "$t"; done;; esac
+    case "$(uname -s)" in (MINGW*|MSYS*|CYGWIN*) ;; (*) git ls-files | while IFS= read -r t; do [ -f "$t" ] && [ -x "$t" ] && printf '%s\n' "$t"; done;; esac
   } | sort -u
 )
 while IFS= read -r f; do
@@ -39,6 +39,9 @@ while IFS= read -r f; do
 done <<EOF
 $EXEC_FILES
 EOF
+# From here on a pipe fails if any stage fails: `node test-x.mjs | tail` used to report tail's status, hiding a crashed test (2026-10-17).
+# (Not above: the exec-bit scan's while-loop legitimately ends non-zero.)
+set -o pipefail
 node --check worker.src.js && node --check bridge.mjs && node --check approve-hook.mjs && node --check route.mjs && node --check catalog.mjs && node --check tune-router.mjs && node --check schedule.mjs && node --check browser.mjs && node --check budget.mjs && for m in turntext turn-events turn-policy models session-store compaction room-dispatch uploads schedule-cli sandbox worker-lib jam-url; do node --check "$m.mjs"; done
 for f in scripts/stack.mjs scripts/dev.mjs dev/fake-claude.mjs dev/fake-claude-rules.mjs test-stack.mjs; do node --check "$f"; done
 node route.test.mjs
@@ -72,11 +75,32 @@ node test-single-bridge.mjs   # offline: throwaway HOME + unroutable host; the n
 grep -qF 'item.role === "driver" && existsSync(path.join(here, ".jam-key"))) delete env.JAM_KEY' bridge.mjs || { echo "jam: FAIL bridge.mjs no longer deletes JAM_KEY from the driver turn env (key leak off-macOS / with JAM_DRIVER_SANDBOX=off)" >&2; exit 1; }
 node -e "new Function(require('fs').readFileSync('ui.html','utf8').match(/<script>([\s\S]*)<\/script>/)[1])"
 ./build.sh >/dev/null && node --check worker.js
+node room-meta.test.mjs >/tmp/jam-room-meta.log || { cat /tmp/jam-room-meta.log; exit 1; }; tail -1 /tmp/jam-room-meta.log   # every Room meta field survives a Durable Object eviction (save → fresh Room → load)
 # worker.js is a committed build artifact. In CI (clean checkout) a rebuild that differs from what was committed means someone edited ui.html,
 # worker.src.js, budget.mjs, worker-lib.mjs or inline-modules.txt and forgot to commit the regenerated bundle. Locally the tree is usually dirty, so only CI enforces it.
 if [ -n "${CI:-}" ] && ! git diff --quiet -- worker.js; then echo "jam: FAIL worker.js is stale: run ./build.sh and commit the regenerated worker.js" >&2; git diff --stat -- worker.js >&2; exit 1; fi
+# Room load guard (2026-10-17, drew-review): an inline // comment in the middle of Room.load()'s one-line field restore commented out six fields,
+# so every Durable Object eviction emptied schedules/usage/auth/catalog/ctx/session and the next save made it permanent.
+if grep -nE '//.*this\.[a-zA-Z]+ = meta\.' worker.src.js; then echo "jam: FAIL a // comment swallows a meta field restore in worker.src.js (Room.load)" >&2; exit 1; fi
 node worker-lib.test.mjs
-node test-worker-hub.mjs | tail -3   # offline: imports the BUILT worker.js and drives Hub REST + auth routing with a fake Durable Object runtime
+node test-worker-hub.mjs >/tmp/jam-worker-hub.log || { tail -20 /tmp/jam-worker-hub.log; exit 1; }; tail -1 /tmp/jam-worker-hub.log   # offline: imports the BUILT worker.js and drives Hub REST + auth routing with a fake Durable Object runtime
+node test-marathon.mjs
+# termcmd.py needs a POSIX pty (pty/fcntl, /tmp): skipped on Windows Git Bash, like the other POSIX-only steps
+case "$(uname -s)" in (MINGW*|MSYS*|CYGWIN*) echo "termcmd: skipped on Windows";; (*)
+python3 termcmd.py --selftest
+T=$(python3 termcmd.py /tmp "/doctor" -- /bin/bash -c 'printf "> "; read l; echo "ran:[$l]"; sleep 60')
+[ "$T" = "$(printf '> /doctor\nran:[/doctor]')" ] || { echo "termcmd e2e: unexpected screen: $T"; exit 1; }
+grep -q '"--setting-sources", "user", "--strict-mcp-config"\], { cwd: r.cfg.cwd, env' bridge.mjs || { echo "termcmd spawn lost --setting-sources user"; exit 1; }
+python3 termcmd.py /tmp x -- /bin/bash -c 'trap "" INT TERM HUP; echo $$ > /tmp/termcmd-stub.pid; sleep 600' >/dev/null & TP=$!; sleep 1.5; kill -INT $TP; wait $TP 2>/dev/null || true; sleep 0.5
+if kill -0 "$(cat /tmp/termcmd-stub.pid)" 2>/dev/null; then echo "termcmd: Stop left the session running"; kill -9 "$(cat /tmp/termcmd-stub.pid)"; exit 1; fi
+esac
+# Tenant isolation gate: a Durable Object id derived anywhere but the hubId/roomId/registryId helpers would silently put a
+# hosted tenant into the root's data (or the reverse). Fail on any other idFromName in the Worker source.
+STRAY=$(grep -n 'idFromName' worker.src.js | grep -v -E '^[0-9]+:(const (hubId|roomId|registryId) = |// )' || true)
+[ -z "$STRAY" ] || { echo "jam: FAIL idFromName outside hubId/roomId/registryId (tenant isolation):" >&2; echo "$STRAY" >&2; exit 1; }
+# Host bundle gate (/dl/jam.tgz is public): exactly the allowlist in mktgz.py, never a key/env/log/session/qa file, every
+# relative import inside it resolvable inside it, and every script in it syntax-clean.
+node tgz.test.mjs
 # Self-update regression guard: build.sh's sed substitutes every literal occurrence of __BUILD__, so any client-
 # side check written as `BUILD!=="__BUILD__"` becomes `<hash>!=="<hash>"` after a build — always false, dead code
 # that silently disables the tab auto-reload path (shipped broken since e3b033b, found 2026-09-10). Fail loud if
@@ -181,14 +205,16 @@ while((m2=re.exec(src))){
 if(found<2){console.error(`jam: FAIL expected at least 2 ws.onmessage handlers (hub + room) in bridge.mjs, found ${found}`);process.exit(1)}
 if(bad.length){console.error(`jam: FAIL ws.onmessage handler(s) at bridge.mjs line(s) ${bad.join("; ")} - a malformed frame there would crash the WHOLE bridge`);process.exit(1)}
 console.log(`jam: onmessage-safety guard ok (${found} handlers, all wrapped)`)'
-# Self-restart watch-list guard (2026-10-09 review): bridge.mjs restarts itself when a file it imports changes on disk, but the list of watched
-# files is hand-written. turntext.mjs was never on it, so edits to it shipped without a restart. Every local import must be watched.
+# Self-restart watch-list guard (2026-10-09 review): bridge.mjs restarts itself when a file it imports changes on disk. turntext.mjs and
+# marathon.mjs were each left off a hand-written list once, so the list is now DERIVED from bridge.mjs's own import lines. This guard checks
+# the derivation still sees every local import (a multi-line import would slip past its one-line regex).
 node -e '
 const src=require("fs").readFileSync("bridge.mjs","utf8");
 const imports=[...src.matchAll(/^import\s[^;]*?from\s+"\.\/([\w.-]+\.mjs)";/gm)].map(m=>m[1]);
-const watch=(/const files = \[([^\]]*(?:\][^\]]*)*?)\]; \/\/ static imports/.exec(src)||[])[1]||"";
-const missing=imports.filter(f=>!watch.includes("\""+f+"\""));
-if(!imports.length||!watch){console.error("jam: FAIL could not find bridge.mjs imports or its self-restart watch list");process.exit(1)}
-if(missing.length){console.error("jam: FAIL bridge.mjs imports "+missing.join(", ")+" but does not watch it for self-restart (add it to the files list near the end of bridge.mjs)");process.exit(1)}
-console.log("jam: self-restart watch list ok ("+imports.length+" imports)")'
+const derive=/const imports = \[\.\.\.readFileSync\(fileURLToPath\(import\.meta\.url\), "utf8"\)\.matchAll\((\/.*\/gm)\)\]/.exec(src);
+if(!imports.length||!derive){console.error("jam: FAIL could not find bridge.mjs imports or its derived self-restart watch list");process.exit(1)}
+const re=eval(derive[1]); const seen=[...src.matchAll(re)].map(m=>m[1]);
+const missing=imports.filter(f=>!seen.includes(f));
+if(missing.length){console.error("jam: FAIL bridge.mjs imports "+missing.join(", ")+" but its self-restart watch list does not pick it up (keep each import on one line)");process.exit(1)}
+console.log("jam: self-restart watch list ok ("+imports.length+" imports, derived)")'
 echo "jam: all checks passed"

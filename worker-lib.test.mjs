@@ -8,7 +8,8 @@ const eq = (name, got, want) => { if (JSON.stringify(got) === JSON.stringify(wan
 eq("roomName lowercases and strips everything but a-z 0-9 _ -", roomName("  My Room! #1_x-y "), "myroom1_x-y");
 eq("roomName caps at 40 and tolerates junk", [roomName("a".repeat(60)).length, roomName(null), roomName(undefined), roomName(5)], [40, "", "", "5"]);
 eq("isAbsCwd: POSIX and Windows absolute", [isAbsCwd("/a"), isAbsCwd("C:\\a"), isAbsCwd("c:/a")], [true, true, true]);
-eq("isAbsCwd: descriptions and relative paths are refused (the #familypod bug, 2026-09-29)", [isAbsCwd("Titan Index working session"), isAbsCwd("a/b"), isAbsCwd("./a"), isAbsCwd("~/a"), isAbsCwd("")], [false, false, false, false, false]);
+eq("isAbsCwd: descriptions and relative paths are refused (the #familypod bug, 2026-09-29)", [isAbsCwd("Titan Index working session"), isAbsCwd("a/b"), isAbsCwd("./a"), isAbsCwd("~a"), isAbsCwd("")], [false, false, false, false, false]);
+eq("isAbsCwd: ~ and ~/path are accepted (the bridge expands them against the host's home)", [isAbsCwd("~"), isAbsCwd("~/a"), isAbsCwd("~\\a")], [true, true, true]);
 
 // token / safeEq
 const toks = new Set(); for (let i = 0; i < 200; i++) toks.add(token());

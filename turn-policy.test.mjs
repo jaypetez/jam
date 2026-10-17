@@ -48,6 +48,7 @@ eq("locked session (2026-10-08) → lockedAbandon, even when fresh", N({ stderr:
 eq("locked twice → falls through to the crash retry", N({ stderr: "Session ID abc is already in use", item: { retriedLocked: true } }), "sessionNotFound");
 eq("locked twice on a fresh session → crash retry", N({ stderr: "Session ID abc is already in use", item: { retriedLocked: true }, fresh: true }), "crashRetry");
 eq("session gone on a resumed session → sessionNotFound", N({ stderr: "No conversation found" }), "sessionNotFound");
+eq("stderr mentions a session but its transcript is on disk → never abandon it (2026-10-16)", N({ stderr: "session hook failed", code: 1, resumable: true }), "crashRetry");
 eq("session gone on a FRESH session is not retried as such", N({ stderr: "No conversation found", fresh: true }), "crashRetry");
 eq("session retried already → crashRetry", N({ stderr: "session x", item: { retried: true } }), "crashRetry");
 eq("scheduler crash → schedulerRetry", N({ item: { role: "scheduler" } }), "schedulerRetry");

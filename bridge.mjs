@@ -16,6 +16,7 @@ import { ScheduleManager } from "./schedule.mjs";
 import { driverSandbox as wrapDriver, HOOK_CMD, runLocalVerdict, reapDriver } from "./sandbox.mjs";
 import { learnRate, learnedRates } from "./budget.mjs";
 import { closingText } from "./turntext.mjs";
+import * as MA from "./marathon.mjs";
 // 2026-10-09 review: the pure/stateful pieces below used to live in this file as ~25 module-level globals and could only be exercised
 // through a live claude. Each has a *.test.mjs sibling run by check.sh. Spawns and the ws.onmessage handlers stay HERE on purpose:
 // check.sh's guards match their literal shape in bridge.mjs.
@@ -38,6 +39,12 @@ const claudeBin = process.env.JAM_CLAUDE || "claude";
 // on Windows, where a .cmd shim can't be spawned without a shell. Anything else is spawned as the binary it is. spawn(...claudeCmd(args), opts).
 const claudeCmd = args => /\.(?:m?js|cjs)$/i.test(claudeBin) ? [process.execPath, [claudeBin, ...args]] : [claudeBin, args];
 if (!key) { console.error("need --key, JAM_KEY, or a .jam-key file"); process.exit(1); }
+// A host on someone else's hub (key from claim.mjs) runs every turn on its own Claude. Guests (drivers) may only spend an
+// Anthropic API key there — Anthropic's consumer terms don't allow sharing a Claude subscription — so a driver's turn gets
+// JAM_DRIVER_API_KEY as its ANTHROPIC_API_KEY, or is refused. The host's own turns keep using the host's Claude login.
+// Read once and dropped from process.env, so no other child (owner turns, compaction, browser.mjs) ever inherits it.
+const driverApiKey = process.env.JAM_DRIVER_API_KEY || ""; delete process.env.JAM_DRIVER_API_KEY;
+const hostedTenant = /^jamo_/.test(key);
 if (!host) { console.error("need --host, JAM_HOST env var, or JAM_HOST in .env (e.g. jam.yourname.workers.dev)"); process.exit(1); }
 
 const stateDir = path.join(os.homedir(), ".jam"); mkdirSync(path.join(stateDir, "sessions"), { recursive: true });
@@ -52,7 +59,7 @@ for (const m of (process.env.JAM_CAPPED || "").split(",").map(s => s.trim()).fil
 const { isCapped, markCapped, windowOf, fits, fallbackTier, labelOf, tierOf, supportsEffort } = M;
 // Host state (sessions, queues, user colors) lives in session-store.mjs, rooted at ~/.jam.
 const store = createStore({ stateDir, home: os.homedir(), log });
-const { saveQueue, loadQueue, queueFile, seedFile, notesFile, sessionFor, saveSession, assignColor } = store;
+const { saveQueue, loadQueue, queueFile, seedFile, notesFile, sessionFor, saveSession, assignColor, resumable } = store;
 const userColors = store.userColors; // one object for the life of the process: the store only ever mutates it
 
 /* ── schedule CLI commands: --list-schedules, --add-schedule room prompt cron [--tier t], --remove-schedule room [cron] (schedule-cli.mjs).
@@ -64,7 +71,7 @@ const userColors = store.userColors; // one object for the life of the process: 
    an orphan started 15:40 raced the launchd bridge until /restart). Newest wins — it stops the previous holder, so a stray
    never survives the supervised instance's next start. Keyed by host; local test hubs are exempt so parallel test bridges don't collide. ── */
 if (host && !only.length && !/^(127\.|localhost|\[?::1)/.test(host)) { // JAM_ONLY bridges (run-tests.sh) intentionally share the prod host with the live one
-  const lock = path.join(stateDir, "bridge-" + host.replace(/[^\w.-]/g, "_") + ".pid");
+  const lock = path.join(stateDir, "bridge-" + host.replace(/[^\w.-]/g, "_") + (hostedTenant ? "-" + key.split("_")[1] : "") + ".pid"); // per host AND tenant: a hosted tenant's bridge on the same Mac never stops the root's
   try {
     const old = parseInt(readFileSync(lock, "utf8"), 10);
     if (old && old !== process.pid && /bridge\.mjs/.test(spawnSync("ps", ["-o", "command=", "-p", String(old)], { encoding: "utf8" }).stdout || "")) {
@@ -143,7 +150,8 @@ const SYSTEM_NOBROWSER = "You are in a shared jam session with several humans ty
 // Drivers get no browser paragraph: browser.mjs needs the hub key and a writable ~/.jam profile, neither of which a sandboxed driver shell has.
 const SYSTEM_BROWSER = " You have a real headless browser: `node browser.mjs '<json-array-of-steps>'` via Bash, run from this cwd. Steps: {action:\"goto\",url}, {action:\"click\",selector}, {action:\"fill\",selector,text}, {action:\"press\",selector,key}, {action:\"wait\",ms} or {action:\"wait\",selector}, {action:\"eval\",js}, {action:\"text\"}, {action:\"screenshot\",caption}. Chain multiple steps in one call for a flow (fill several fields, then submit) — a fresh call re-launches the page and loses any unsaved in-page state, though cookies/login persist per room. Every call (unless you pass --silent) posts a screenshot card into the room for everyone to see, so use it for anything visual — checking a live page, QA'ing a deploy, showing Mike a result — not just as your own scratch space.";
 const SYSTEM_BASE = SYSTEM_NOBROWSER + SYSTEM_BROWSER;
-const systemFor = item => item.role === "driver" ? SYSTEM_NOBROWSER : SYSTEM_BASE;
+const SYSTEM_MARATHON = n => ` Long work is fine here: a turn is only cut after 10 silent minutes or at a 45-minute checkpoint, and then continued automatically. If you end a turn with the job unfinished and more you can do without anyone's input, make the last line of your reply exactly MARATHON-CONTINUE ${n} and your next turn starts on its own. Never use it to ask a question or wait for a person.`;
+const systemFor = (r, item) => (item.role === "driver" ? SYSTEM_NOBROWSER : SYSTEM_BASE) + (item.role !== "driver" && marathonOn(r) ? SYSTEM_MARATHON(item.maNonce ||= MA.nonce()) : "");
 
 /* ── compaction: replace a long session with a handoff summary + fresh session (thresholds, prompts and attempt order: compaction.mjs) ──
    hard / soft / manual triggers are documented in compaction.mjs. */
@@ -213,7 +221,7 @@ async function compact(r, why) {
   r.send({ type: "compacted", ctx: r.lastCtx, ctxMax: mu?.contextWindow || null, before, cost: ev.total_cost_usd }); addPlanCost(ev.total_cost_usd);
   if (chargeTo) r.send({ type: "spend", id: chargeTo, cost: ev.total_cost_usd || 0, model: used, final: true }); // a /compact a driver typed is on their budget
   r.compacting = false; r.running = false; r.compactWanted = null;
-  r.send(sessionEvent(r));
+  sendSession(r);
   setTimeout(() => pump(r), 50); return true;
 }
 function seedFor(r) { if (r.seed) return r.seed; try { return readFileSync(seedFile(r), "utf8"); } catch { return null; } }
@@ -365,12 +373,20 @@ function refreshLive(catalogOnly) {
   if (Date.now() - catalogAt > 60000) refreshCatalog();
 }
 function runOne(r, item) {
-  r.running = true; r.current = item.id; r.runningItem = item; r.since = Date.now(); r.warnedStale = false; r.lastTool = null; r.currentTask = null; r.send({ type: "start", id: item.id });
+  r.running = true; r.current = item.id; r.runningItem = item; r.since = Date.now(); r.lastOut = Date.now(); r.marathonCut = null; r.warnedStale = false; r.lastTool = null; r.currentTask = null; r.send({ type: "start", id: item.id });
+  if (item.role === "driver" && hostedTenant && !driverApiKey && !process.env.ANTHROPIC_API_KEY) {
+    log(`#${r.cfg.name}`, "driver turn refused: no JAM_DRIVER_API_KEY on this host");
+    r.running = false; r.current = null; r.runningItem = null;
+    r.send({ type: "error", id: item.id, text: "This host hasn't set up guest turns yet. Guests' messages need the host's Anthropic API key (JAM_DRIVER_API_KEY in the bridge's .env) — a Claude subscription can't be shared. Ask the host to add one; viewers can still watch." });
+    setTimeout(() => pump(r), 50); return;
+  }
+  const tname = termOnly(item);
+  if (tname) { runTerminal(r, item, tname); return; }
   const args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     "--dangerously-skip-permissions", "--settings", settingsPath,
     // Only the owner's user settings load: a room's .claude/settings.json (env, hooks, apiKeyHelper, statusLine) and .mcp.json are
     // files a driver could plant, and they'd otherwise run with owner rights and override the bridge's own env (sam-security, 9/29).
-    "--setting-sources", "user", "--append-system-prompt", systemFor(item),
+    "--setting-sources", "user", "--append-system-prompt", systemFor(r, item),
     r.fresh ? "--session-id" : "--resume", r.sessionId];
   // a driver near their budget (worker flags the message "downshift") runs on the light tier, whatever the room pins
   const downshift = item.budget === "downshift";
@@ -395,8 +411,15 @@ function runOne(r, item) {
       setTimeout(() => pump(r), 50); return;
     } else {
       r.running = false; r.current = null; r.runningItem = null;
-      r.send({ type: "error", id: item.id, text: allCapped ? "Every model is at its usage limit right now, so this message can't run. Send it again once a limit resets."
+      const maraCapped = allCapped && String(item.id).startsWith("mara-") && marathonOn(r);
+      r.send({ type: "error", id: item.id, text: maraCapped ? "Every model is at its usage limit, so the marathon pauses here and resumes on its own."
+        : allCapped ? "Every model is at its usage limit right now, so this message can't run. Send it again once a limit resets."
         : `${chosen} ${isCapped(model) ? "hit its usage limit" : "can't hold this session"} and compacting didn't bring the session down far enough. Pick another model, or try /compact.` });
+      if (maraCapped && !maOf(r)?.paused) { // no save turn (it couldn't run either) and no requeue: the resume tick queues a fresh continuation
+        const now = Date.now(), until = Math.min(...[...M.capped.values()].filter(t => t > now));
+        marathonSet(r, { paused: { reason: "every model at its usage limit", kind: null, resetsAt: Number.isFinite(until) ? until : null, at: now, nextCheck: now + MA.RESUME_MS, role: item.role || "driver", origin: origin(item) } },
+          `⏸ Marathon paused: every model is at its usage limit. I'll check every 15 min and resume on my own.`);
+      }
       setTimeout(() => pump(r), 50); return;
     }
   }
@@ -410,6 +433,7 @@ function runOne(r, item) {
   log(`#${r.cfg.name}`, "turn", item.id.slice(0, 8), r.fresh ? "(new session)" : "(resume)", "from", item.from, item.role || "");
   item.startedAt = Date.now(); item.model = model; item.tier = auto ? pick.tier : "manual"; item.score = auto ? pick.score : null;
   const env = { ...process.env, CLAUDECODE: undefined, JAM_HOST: host, JAM_KEY: key, JAM_ROOM: r.cfg.name, JAM_FROM: item.from, JAM_FROM_ROLE: item.role || "driver", JAM_TURN: item.id, JAM_CWD: r.cfg.cwd };
+  if (item.role === "driver" && driverApiKey) env.ANTHROPIC_API_KEY = driverApiKey; // guests bill the host's API key, never its subscription (see hostedTenant)
   delete env.JAM_RUN_LOCAL; // never inherited: the hook's only source for "the owner trusts drivers' commands in this room" is the line below
   // 2026-10-09 review: only the Seatbelt path (sandbox.mjs) used to scrub JAM_KEY, so off-macOS or with JAM_DRIVER_SANDBOX=off a driver's claude ran with the hub key in its env (readable by any same-uid process). The hook reads .jam-key from disk, so drop it for every driver turn.
   if (item.role === "driver" && existsSync(path.join(here, ".jam-key"))) delete env.JAM_KEY;
@@ -429,7 +453,11 @@ function runOne(r, item) {
   if (process.platform === "darwin") { try { r.caffeinate = spawn("caffeinate", ["-i"], { stdio: "ignore" }); r.caffeinate.on("error", e => { log(`#${r.cfg.name}`, "caffeinate unavailable:", e.message); r.caffeinate = null; }); } catch (e) { log(`#${r.cfg.name}`, "caffeinate unavailable:", e.message); } }
   const att = (item.attachments || []).filter(a => a.path).map(a => a.path);
   const seedText = seed ? `[Handoff from the previous session in this room, written by Claude when the context was compacted. Treat it as established context; do not repeat it back.]\n\n${seed}\n\n---\n\n` : "";
-  child.stdin.end(notesFor(r) + seedText + `[${item.from}]: ${item.text}` + (att.length ? `\n\n[Attachments from ${item.from}, saved on this machine: ${att.join(", ")}] — open them with the Read tool (images render).` : ""));
+  // A Claude Code slash command only runs when it is the very first thing in the prompt, so an owner's "/name …" goes in raw —
+  // no room notes, handoff or "[name]:" tag in front (a pending handoff waits for the next ordinary turn). Drivers' text is
+  // never treated as a command: commands like /config or /mcp act on the host's own Claude setup.
+  const slash = isSlash(item);
+  child.stdin.end(slash ? item.text.trim() : notesFor(r) + seedText + `[${item.from}]: ${item.text}` + (att.length ? `\n\n[Attachments from ${item.from}, saved on this machine: ${att.join(", ")}] — open them with the Read tool (images render).` : ""));
   let buf = "", stderr = ""; const st = newTurnState(); // st.usages: message id → usage, for pricing an attempt that never reaches a result
   if (sbErr) stderr += `\ndriver sandbox unavailable: ${sbErr}`;
   const finish = ev => {
@@ -461,7 +489,7 @@ function runOne(r, item) {
           const mu = Object.values(ev.modelUsage || {}).sort((a, b) => ((b.cacheReadInputTokens | 0) + (b.inputTokens | 0)) - ((a.cacheReadInputTokens | 0) + (a.inputTokens | 0)))[0];
           if (ctx) { r.lastCtx = ctx; saveSession(r); }
           M.observeWindows(ev.modelUsage);
-          if (seed) { r.seed = null; try { unlinkSync(seedFile(r)); } catch {} }
+          if (seed && !slash) { r.seed = null; try { unlinkSync(seedFile(r)); } catch {} } // a slash command never carried the handoff — keep it for the next ordinary turn
           r.turnsSinceCompact = (r.turnsSinceCompact | 0) + 1; r.lastActivity = Date.now();
           r.lastDone = { id: item.id, tier: item.tier, ts: Date.now() };
           const windowMax = mu?.contextWindow || windowOf(item.model);
@@ -478,10 +506,11 @@ function runOne(r, item) {
     log(`#${r.cfg.name}`, "done", item.id.slice(0, 8), ev.duration_ms + "ms"); setTimeout(pollUsage, 4000);
   };
   child.stdout.on("data", d => {
-    buf += d; let i;
+    r.lastOut = Date.now(); buf += d; let i;
     while ((i = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line.trim()) continue;
       let ev; try { ev = JSON.parse(line); } catch { continue; }
+      if (ev.type === "system" && ev.subtype === "init" && Array.isArray(ev.slash_commands)) { learnCommands(ev.slash_commands, ev.terminal_slash_commands); continue; }
       for (const o of reduceStreamEvent(ev, st, item.id)) r.send(o); // stream-json → room events: turn-events.mjs
       r.lastTool = st.lastTool; r.currentTask = st.currentTask; // heartbeats read these off the room
     }
@@ -497,8 +526,21 @@ function runOne(r, item) {
     const attemptCost = st.lastResult && Number.isFinite(st.lastResult.total_cost_usd) ? st.lastResult.total_cost_usd : estimateCost(M.catalog?.models, item.model, st.usages);
     if (attemptCost > 0) { addPlanCost(attemptCost); r.send({ type: "spend", id: item.id, cost: attemptCost, model: item.model }); }
     if (st.lastResult) finish(st.lastResult);
-    if (!st.gotResult) {
-      const verdict = decideNoResult({ item, fresh: r.fresh, stopped: r.stopped, code, stderr }); // ordered guards: turn-policy.mjs
+    // a killed first turn (marathon cut, watchdog, restart) never flips r.fresh, but it already wrote a transcript: the next
+    // turn must --resume it — `--session-id` on an existing id is "already in use", which used to abandon the session and
+    // its context (2026-10-16: two marathon cuts in a long-running room lost ~45 min of work that way)
+    if (r.fresh && !st.gotResult && !item.retryFresh && resumable(r.cfg.cwd, r.sessionId)) {
+      r.fresh = false; if (seed && !slash) { r.seed = null; try { unlinkSync(seedFile(r)); } catch {} } saveSession(r); // a slash command never carried the handoff
+      log(`#${r.cfg.name}`, "session", r.sessionId.slice(0, 8), "has a transcript now — resuming it next turn");
+    }
+    const cut = st.gotResult ? null : r.marathonCut; r.marathonCut = null;
+    if (cut) {
+      r.send({ type: "error", id: item.id, text: cut === "pause" ? "Paused by marathon: plan limit nearly used up." : "Cut by marathon (" + cut + "); continuing in a new turn." });
+      if (!String(item.id).startsWith("mara-") && cut === "pause" && !r.stopped) { r.queue.unshift({ ...item, id: item.id }); saveQueue(r); }
+      marathonAfterCut(r, item, cut);
+    }
+    else if (!st.gotResult) {
+      const verdict = decideNoResult({ item, fresh: r.fresh, stopped: r.stopped, code, stderr, resumable: !r.fresh && resumable(r.cfg.cwd, r.sessionId) }); // ordered guards: turn-policy.mjs
       if (verdict === "retryFresh") { delete item.retryFresh; r.queue.unshift(item); } // same id, --session-id this time (see session-store.mjs transcriptOf)
       else if (verdict === "lockedAbandon") {
         log(`#${r.cfg.name}`, "session", r.sessionId.slice(0, 8), "still locked — abandoning it for a new one"); item.retriedLocked = true;
@@ -528,7 +570,8 @@ function runOne(r, item) {
     if (r.pendingCfg) { // deferred directory change: reopen there, carrying the queue
       const c = r.pendingCfg, q = r.queue; r.queue = []; closeRoom(r.cfg.name); const nr = openRoom(c); if (nr) { nr.queue.push(...q); setTimeout(() => pump(nr), 50); } return;
     }
-    r.send(sessionEvent(r));
+    sendSession(r);
+    if (!cut) marathonAfterTurn(r, item, st.gotResult && st.lastResult && !st.lastResult.is_error, closingText(st.text, st.lastResult?.result) || "");
     setTimeout(() => pump(r), 50);
   };
   child.on("close", onChildClose);
@@ -536,11 +579,60 @@ function runOne(r, item) {
   // listener Node throws and kills the whole bridge, taking every other room down with it (2026-09-28 outage).
   child.on("error", err => { stderr += `\nspawn error: ${err.message}`; onChildClose(1); });
 }
+/* ── slash commands: Claude Code reports exactly which commands a headless (-p) turn can run in every turn's init event, so
+   the list refreshes itself — a new command, skill or plugin shows up after the next turn (or the next page open, via the
+   file scan below). Persisted so a restarted bridge knows them before its first turn. ── */
+const CMD_FILE = path.join(stateDir, "slash-commands.json");
+let slashCmds = (() => { try { return JSON.parse(readFileSync(CMD_FILE, "utf8")); } catch { return { run: [], terminal: ["doctor", "color", "focus", "reload-plugins"] }; } })(); // fallback = what 2.1.301 reports, until the first init
+const JAM_CMDS = ["compact", "marathon"]; // handled by jam itself
+function isSlash(item) { const t = String(item.text || "").trim(); return item.role !== "driver" && /^\/[a-z0-9][\w:.-]*(\s|$)/i.test(t) && !/^\/compact\b/i.test(t); }
+function scanCommandFiles(cwds) { // ~/.claude and each room's .claude: commands/*.md and skills/*/SKILL.md, for commands added since the last turn
+  const out = new Set();
+  for (const base of [path.join(os.homedir(), ".claude"), ...cwds.map(c => path.join(c, ".claude"))]) {
+    try { for (const f of readdirSync(path.join(base, "commands"))) if (f.endsWith(".md")) out.add(f.slice(0, -3)); } catch {}
+    try { for (const d of readdirSync(path.join(base, "skills"))) if (existsSync(path.join(base, "skills", d, "SKILL.md"))) out.add(d); } catch {}
+  }
+  return [...out];
+}
+// init lists terminal-only commands in BOTH slash_commands and terminal_slash_commands — terminal wins (they can't run under -p)
+function commandList() { const term = new Set(slashCmds.terminal || []), run = new Set([...JAM_CMDS, ...(slashCmds.run || []), ...scanCommandFiles([...rooms.values()].map(r => r.cfg.cwd))]); run.delete("__remote-workflow"); for (const t of term) run.delete(t); return { type: "commands", list: [...run].filter(c => !c.startsWith("__")).sort(), terminal: [...term].sort() }; }
+function termOnly(item) { if (!isSlash(item)) return null; const n = item.text.trim().slice(1).split(/\s/)[0]; return (slashCmds.terminal || []).includes(n) ? n : null; }
+/* Terminal-only commands (/doctor, /color …) need an interactive TTY. With "Run commands on this machine" on, open a throwaway
+   interactive claude in a pty (termcmd.py), type the command, snapshot the screen once output settles, close the session. Owner
+   only (isSlash never matches drivers). It runs as the owner's plain interactive claude: their default permission mode, nobody
+   to answer prompts, so anything needing approval is refused rather than auto-allowed. Not resumed into the room's session. */
+function runTerminal(r, item, name) {
+  let out = "", err = "", done = false;
+  const end = msg => { if (done) return; done = true; r.child = null; r.running = false; r.current = null; r.runningItem = null; r.lastActivity = Date.now(); r.send(msg); setTimeout(() => pump(r), 50); };
+  if (r.cfg.runLocal !== true) return end({ type: "done", id: item.id, text: `\`/${name}\` only runs in an interactive terminal. Turn on **Run commands on this machine** for this room and send it again: jam opens a throwaway terminal session, runs it, and closes it.` });
+  log(`#${r.cfg.name}`, "terminal-only", "/" + name, "→ throwaway pty session");
+  r.send({ type: "sys", text: `/${name} is terminal-only, so it's running in a throwaway terminal session (closes itself when done).`, ts: Date.now() });
+  const env = { ...process.env }; delete env.CLAUDECODE; delete env.ANTHROPIC_API_KEY; for (const k of Object.keys(env)) if (/^(JAM_|CF_|CLOUDFLARE_)/.test(k)) delete env[k]; // no API key: its "use this key?" dialog would eat the typed command
+  const child = r.child = spawn("python3", [path.join(here, "termcmd.py"), r.cfg.cwd, item.text.trim(), "--", claudeBin, "--setting-sources", "user", "--strict-mcp-config"], { cwd: r.cfg.cwd, env, stdio: ["ignore", "pipe", "pipe"] }); // like every turn: the room's .claude/settings.json + .mcp.json never load
+  child.stdout.on("data", d => { out += d; }); child.stderr.on("data", d => { err += d; });
+  child.on("error", e => end({ type: "error", id: item.id, text: `couldn't open a terminal session: ${e.message}` }));
+  child.on("close", code => {
+    const shot = out.replace(/```/g, "ʼʼʼ").trim();
+    if (code === 0 && shot) end({ type: "done", id: item.id, text: `\`/${name}\` ran in a throwaway terminal session (now closed). Final screen:\n\n\`\`\`text\n${shot}\n\`\`\`` });
+    else if (code === 3 && shot) end({ type: "done", id: item.id, text: shot });
+    else end({ type: "error", id: item.id, text: code === null || r.stopped ? "stopped" : `terminal session for /${name} failed (exit ${code})` + (err ? "\n" + err.slice(-600) : "") });
+  });
+}
+let lastCmdSig = "";
+function sendCommands(force) { const c = commandList(), sig = JSON.stringify(c); if (!force && sig === lastCmdSig) return; lastCmdSig = sig; for (const r of rooms.values()) r.send(c); }
+function learnCommands(run, terminal) {
+  const next = { run: run.map(String).slice(0, 400), terminal: Array.isArray(terminal) ? terminal.map(String).slice(0, 400) : slashCmds.terminal || [] };
+  if (JSON.stringify(next) === JSON.stringify(slashCmds)) return;
+  slashCmds = next; try { writeFileSync(CMD_FILE + ".tmp", JSON.stringify(next)); renameSync(CMD_FILE + ".tmp", CMD_FILE); } catch {}
+  sendCommands();
+}
 function pump(r) {
   if (r.running || r.closed) return;
   // a requested compaction runs before the next message; an automatic one waits for the queue to drain
-  if (r.compactWanted && (r.compactWanted.startsWith("requested") || !r.queue.length)) { const why = r.compactWanted; r.compactWanted = null; compact(r, why); return; }
-  if (!r.queue.length) return; const item = r.queue.shift(); saveQueue(r); runOne(r, item);
+  const paused = !!maOf(r)?.paused, i = MA.pickNext(r.queue, paused); // a paused marathon holds its continue turns
+  if (r.compactWanted && (r.compactWanted.startsWith("requested") || i < 0)) { const why = r.compactWanted; r.compactWanted = null; compact(r, why); return; }
+  if (i < 0) return;
+  const [item] = r.queue.splice(i, 1); saveQueue(r); runOne(r, item);
 }
 
 // spawn() never sets `detached`, so a child shares the bridge's own process group — killing that group would kill
@@ -562,6 +654,7 @@ setInterval(() => {
   for (const r of rooms.values()) {
     if (!r.child || !r.since) continue;
     const age = now - r.since;
+    if (marathonOn(r) && !r.compacting && r.runningItem?.role !== "driver") { marathonWatch(r, now, age); continue; } // guests keep the 10-min cap: continuations would dodge their per-turn budget; a compaction keeps it too (marathonWatch skips compactions, so a hung one would block the room forever)
     if (age > TURN_KILL_MS) {
       log(`#${r.cfg.name}`, "turn has run", Math.round(age / 60000) + "min — killing it (stuck-turn watchdog)");
       r.send({ type: "sys", text: `⚠️ This turn has been running ${Math.round(age / 60000)} minutes with no sign of finishing — stopping it so the room isn't blocked. It'll retry once automatically.`, ts: Date.now() });
@@ -574,12 +667,134 @@ setInterval(() => {
   }
 }, 30000);
 
+// ── marathon mode wiring (marathon.mjs has the why). Only owners turn it on; its turns run as role "owner" on their behalf.
+const MA_FILE = path.join(stateDir, "marathon.json");
+const maOf = r => MA.loadState(MA_FILE)[r.cfg.name] || null;
+const maMode = r => { const s = maOf(r); return s?.off ? "off" : s?.on ? "full" : "auto"; }; // auto = the default for every room (2026-10-16)
+const marathonOn = r => maMode(r) !== "off";
+const sendSession = r => { let marathon = null; try { marathon = maMode(r); } catch {} r.send({ ...sessionEvent(r), marathon }); };
+const hhmm = t => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+function marathonSet(r, patch, msg) {
+  const fail = why => { log(`#${r.cfg.name}`, "marathon state", why); r.send({ type: "sys", text: `Marathon state couldn't be saved (${why}); this change didn't take.`, ts: Date.now() }); sendSession(r); return false; }; // the echo puts the Turn panel switch back
+  const before = maMode(r);
+  let st; try { st = MA.loadState(MA_FILE, true); } catch (e) {
+    if (!e.corrupt) return fail("unreadable: " + e.message); // EACCES/EIO: never rebuild every room's state from {}
+    const q = MA_FILE + ".corrupt-" + Date.now(); try { renameSync(MA_FILE, q); } catch {}
+    log(`#${r.cfg.name}`, "marathon state was corrupt; moved to", q, "— starting fresh"); st = {};
+  }
+  if (patch) st[r.cfg.name] = { ...(st[r.cfg.name] || {}), ...patch }; else delete st[r.cfg.name];
+  try { MA.saveState(MA_FILE, st); } catch (e) { return fail("write failed: " + e.message); }
+  if (msg) { log(`#${r.cfg.name}`, "marathon:", msg); r.send({ type: "sys", text: msg, ts: Date.now() }); }
+  if (maMode(r) !== before) sendSession(r); // keeps the Turn panel switch in step
+  if (!patch || patch.paused === null) setTimeout(() => pump(r), 50); // a cleared pause releases held continue turns
+  return true;
+}
+const origin = it => it?.origin || it?.id || null; // the human message a marathon chain started from — a demotion of its sender reaches every continuation
+function marathonEnqueue(r, why, opts = {}) {
+  const file = MA.progressFile(stateDir, r.cfg.name); let prog = ""; try { prog = readFileSync(file, "utf8"); } catch {}
+  // a continuation runs with the rights of the turn it continues: a guest's cut turn carries on sandboxed, never as owner
+  const item = { id: "mara-" + randomUUID(), type: "say", from: "marathon", role: opts.role || "driver", origin: opts.origin || null, ts: Date.now(), attachments: [],
+    text: opts.save ? MA.savePrompt(file, opts.limit) : MA.continuePrompt(file, prog, why), marathonSave: !!opts.save, forceTier: opts.save ? "medium" : null };
+  if (opts.save) r.queue.unshift(item); else r.queue.push(item);
+  saveQueue(r); r.lastActivity = Date.now(); setTimeout(() => pump(r), 50);
+}
+function demote(r, m) { // Hub → Room → here when an invite's role drops or it's revoked; MA.demotePlan has the rules
+  const d = MA.demotePlan(r.queue, maOf(r)?.paused, r.child ? r.runningItem : null, m.ids, m.role);
+  if (d.changed) { r.queue = d.queue; saveQueue(r); }
+  if (d.pausedPatch) marathonSet(r, d.pausedPatch);
+  if (d.stop) { r.stopped = true; setTimeout(() => r.stopped = false, 10000); r.child.kill("SIGINT"); const c = r.child; setTimeout(() => c && !c.killed && c.kill("SIGKILL"), 3000); }
+  if (d.said.length) { log(`#${r.cfg.name}`, "demote →", m.role, d.said.join(", ")); r.send({ type: "sys", text: `Role change: ${d.said.join(", ")}.`, ts: Date.now() }); }
+}
+function marathonCmd(r, arg, from, fromId) {
+  const s = maOf(r), a = arg.toLowerCase();
+  if (a === "on") {
+    marathonSet(r, { on: true, by: from, since: Date.now(), fails: 0, paused: null }, `🏃 Marathon on (by ${from}): this room keeps working turn after turn until the job's done, pausing when any plan limit has ${MA.FLOOR}% left and resuming on its own (checks every 15 min). Progress lives in ${MA.progressFile(stateDir, r.cfg.name)}. Stop or \`/marathon off\` ends it.`);
+    if (!r.running && !r.queue.length) marathonEnqueue(r, "started", { role: "owner", origin: fromId || null }); // only an owner can send /marathon
+  } else if (a === "off") { marathonOff(r, null); marathonSet(r, { off: true }, `Marathon off (by ${from}): turns here go back to the 10-minute cap, no auto-continue. \`/marathon auto\` restores the default.`); }
+  else if (a === "auto") marathonOff(r, `Marathon back to the default (by ${from}): long turns aren't cut at 10 min, cut turns continue, and Claude keeps going when it ends with MARATHON-CONTINUE.`);
+  else r.send({ type: "sys", text: s?.off ? "Marathon is off here. `/marathon auto` (default) or `/marathon on` (keep going until done)." : !s?.on && !s?.paused ? "Marathon: default mode — long turns run, cut turns continue, Claude can say MARATHON-CONTINUE. `/marathon on` = keep going until done; `/marathon off` = old 10-min cap." : s.paused ? `Marathon paused: ${s.paused.reason}. Next usage check ${hhmm(s.paused.nextCheck)}.` : `Marathon running since ${hhmm(s.since)} (by ${s.by}).`, ts: Date.now() });
+}
+function marathonPause(r, reason, limit, role, from) {
+  const now = Date.now(), resetsAt = limit?.resetsAt || null;
+  marathonSet(r, { paused: { reason, kind: limit?.kind || null, resetsAt, at: now, nextCheck: now + MA.RESUME_MS, role: role || r.runningItem?.role || "driver", origin: from || origin(r.runningItem) } },
+    `⏸ Marathon paused: ${reason}.${limit ? " Saving progress first." : ""} I'll check plan usage every 15 min${resetsAt ? ` (it resets ${hhmm(resetsAt)})` : ""} and resume on my own.`);
+  if (!limit) return;
+  if (r.child) { r.marathonCut = "pause"; killTree(r.child.pid); } else marathonEnqueue(r, "pausing", { save: true, limit, role: role || "driver", origin: from || origin(r.runningItem) });
+}
+function marathonWatch(r, now, age) { // the stuck-turn watchdog, for marathon rooms
+  if (r.compacting || !r.runningItem || r.marathonCut) return; // compaction prints nothing until done: never treat it as a silent turn
+  const s = maOf(r), lim = freshLimit();
+  if (lim && !s?.paused && !r.runningItem.marathonSave && (s?.on || String(r.runningItem.id).startsWith("mara-"))) return marathonPause(r, `${MA.limitName(lim)} plan limit at ${lim.percent}% used`, lim);
+  const idle = now - (r.lastOut || r.since);
+  if (idle > MA.IDLE_KILL_MS || age > MA.TURN_CAP_MS) {
+    r.marathonCut = idle > MA.IDLE_KILL_MS ? "idle" : "checkpoint";
+    log(`#${r.cfg.name}`, "marathon cut:", r.marathonCut, Math.round(age / 60000) + "min");
+    killTree(r.child.pid);
+  }
+}
+function marathonAfterCut(r, item, cut) {
+  if (r.stopped || item.role === "driver") return;
+  if (cut !== "pause" && !autoBudget(r, item)) return;
+  if (cut === "pause") { if (marathonOn(r)) marathonEnqueue(r, "pausing", { save: true, limit: MA.blockingLimit(lastUsage?.limits), role: item.role, origin: origin(item) }); return; }
+  if (!marathonOn(r)) return;
+  r.send({ type: "sys", text: cut === "idle" ? "Marathon: that turn went 10 minutes without a sound — cutting it and continuing from the session." : `Marathon checkpoint: that turn ran ${Math.round(MA.TURN_CAP_MS / 60000)} minutes — continuing in a fresh turn (nothing's lost, it's all in the session).`, ts: Date.now() });
+  marathonEnqueue(r, cut === "idle" ? "the last turn went silent" : "checkpoint", { role: item.role, origin: origin(item) });
+}
+function marathonAfterTurn(r, item, ok, text) {
+  const s = maOf(r); if (s?.off || s?.paused || item.marathonSave || r.stopped) return;
+  if (!s?.on) { // default mode: continue only when Claude asks to
+    if (!ok || item.role === "driver" || !MA.isContinue(text, item.maNonce) || !autoBudget(r, item)) return; // guests can't self-continue
+    const lim = freshLimit(); if (lim) return marathonPause(r, `${MA.limitName(lim)} plan limit at ${lim.percent}% used`, lim, item.role, origin(item));
+    if (!r.queue.length) marathonEnqueue(r, "you asked to keep going", { role: item.role, origin: origin(item) }); return;
+  }
+  if (item.role === "driver") return; // never continue a guest's turn, even in full mode
+  if (ok && DONE_TEXT(text)) return marathonSet(r, null, "🏁 Marathon done — Claude says the job's finished. Room is back to the default.");
+  const fails = ok ? 0 : (s.fails | 0) + 1;
+  if (fails >= MA.MAX_FAILS) { marathonSet(r, { fails: 0 }); return marathonPause(r, `${fails} turns in a row failed`, null, item.role, origin(item)); }
+  marathonSet(r, { fails });
+  const lim = freshLimit();
+  if (lim) return marathonPause(r, `${MA.limitName(lim)} plan limit at ${lim.percent}% used`, lim, item.role, origin(item));
+  if (!r.queue.length) marathonEnqueue(r, ok ? "next step" : "the last turn failed — check what happened, then carry on", { role: item.role, origin: origin(item) });
+}
+// unattended turns in a row with no person posting; a hung tool or a self-continuing loop stops here instead of burning the plan
+const MAX_AUTO = 12;
+function autoBudget(r, item) {
+  if (maMode(r) === "full") return true; // full mode has its own fail counter and the DONE token
+  r.autoRuns = (r.autoRuns | 0) + 1;
+  if (r.autoRuns <= MAX_AUTO) return true;
+  r.send({ type: "sys", text: `Marathon: ${MAX_AUTO} unattended turns in a row — stopping here until someone posts. \`/marathon on\` to keep going until done.`, ts: Date.now() }); return false;
+}
+const DONE_TEXT = t => MA.DONE_RE.test(String(t || ""));
+const freshLimit = () => lastUsage && Date.now() - lastUsage.ts < 10 * 60 * 1000 ? MA.blockingLimit(lastUsage.limits) : null;
+function marathonOff(r, msg) { r.queue = r.queue.filter(x => !String(x.id).startsWith("mara-")); saveQueue(r); marathonSet(r, null, msg); } // → default (auto) mode
+setInterval(async () => { // resume check for paused marathons; survives restarts because the pause is on disk
+  const now = Date.now();
+  const due = [...rooms.values()].filter(r => { const s = maOf(r); return s?.paused && !s.off && now >= Math.max(s.paused.nextCheck, r.maNextCheck || 0) && !r.closed; });
+  if (!due.length) return;
+  await pollUsage(); // once per tick, not once per paused room
+  for (const r of due) {
+    const s = maOf(r); if (r.closed || !s?.paused || s.off) continue;
+    const { resume, blind, lim } = MA.resumeDecision(s.paused, lastUsage, Date.now());
+    r.maNextCheck = Date.now() + MA.RESUME_MS; // in memory too: an unwritable state file mustn't mean a check (and an error card) every minute
+    if (resume) {
+      if (marathonSet(r, { paused: null, fails: 0 }, blind ? `▶️ Marathon resuming — plan usage is unreadable, but the limit should have reset by now (paused since ${hhmm(s.paused.at)}).`
+        : `▶️ Marathon resuming — plan usage has room again (paused since ${hhmm(s.paused.at)}).`)
+        && !r.queue.some(x => String(x.id).startsWith("mara-"))) marathonEnqueue(r, "resumed after a usage pause", { role: s.paused.role || "driver", origin: s.paused.origin || null });
+    } else {
+      marathonSet(r, { paused: { ...s.paused, nextCheck: Date.now() + MA.RESUME_MS } });
+      log(`#${r.cfg.name}`, "marathon still paused:", lim ? `${MA.limitName(lim)} at ${lim.percent}%` : "usage unreadable", "— next check", hhmm(Date.now() + MA.RESUME_MS));
+    }
+  }
+}, 60000);
+
+const expandHome = s => typeof s === "string" && /^~(?:[\\/]|$)/.test(s) ? path.join(os.homedir(), s.slice(1)) : s; // the hub accepts "~/project" but only the host knows its home
 function openRoom(cfg) {
   if (!cfg || !cfg.name) { log("openRoom: invalid config", JSON.stringify(cfg).slice(0, 100)); return; }
   // Defense in depth: the worker now rejects a non-absolute cwd at creation time, but an older client, a direct API
   // call, or a room created before that check existed can still hand us one. A relative cwd resolves against THIS
   // process's own directory (jam's own source tree), silently mixing an unrelated project's files into it — that's
   // exactly how #familypod's research ended up inside jam/ (found and fixed 2026-09-29). Refuse rather than repeat it.
+  cfg.cwd = expandHome(cfg.cwd);
   if (!isAbsCwd(cfg.cwd)) { log(`#${cfg.name}`, "refusing relative/invalid cwd:", JSON.stringify(cfg.cwd)); const existingBad = rooms.get(cfg.name); if (existingBad) existingBad.send({ type: "sys", text: `⚠️ This room's directory ("${cfg.cwd}") isn't an absolute path, so the bridge won't run turns in it — fix it from room settings.`, ts: Date.now() }); return; }
   if (!bridgeOpensRoom(cfg.name, only)) return; // test-* rooms are for --only bridges; --only patterns support * glob
   const existing = rooms.get(cfg.name);
@@ -591,14 +806,14 @@ function openRoom(cfg) {
       }
       closeRoom(cfg.name);
     } else {
-      if (!!existing.cfg.runLocal !== !!cfg.runLocal) { existing.cfg.runLocal = !!cfg.runLocal; log(`#${cfg.name}`, "run-commands-locally →", cfg.runLocal ? "ON for drivers" : "off"); existing.send({ type: "session", id: existing.sessionId, cwd: cfg.cwd, model: cfg.model, tier: cfg.tier, effort: cfg.effort, runLocal: !!cfg.runLocal }); }
+      if (!!existing.cfg.runLocal !== !!cfg.runLocal) { existing.cfg.runLocal = !!cfg.runLocal; log(`#${cfg.name}`, "run-commands-locally →", cfg.runLocal ? "ON for drivers" : "off"); existing.send({ type: "session", id: existing.sessionId, cwd: cfg.cwd, model: cfg.model, tier: cfg.tier, effort: cfg.effort, runLocal: !!cfg.runLocal, marathon: maMode(existing) }); }
       const modelChanged = existing.cfg.model !== cfg.model, tierChanged = existing.cfg.tier !== cfg.tier, effortChanged = existing.cfg.effort !== cfg.effort;
       if (modelChanged || tierChanged || effortChanged) {
         if (modelChanged) log(`#${cfg.name}`, "model →", cfg.model || "default");
         if (tierChanged) log(`#${cfg.name}`, "tier →", cfg.tier || "auto");
         if (effortChanged) log(`#${cfg.name}`, "effort →", cfg.effort || "auto");
         existing.cfg.model = cfg.model; existing.cfg.tier = cfg.tier; existing.cfg.effort = cfg.effort;
-        existing.send(sessionEvent(existing));
+        sendSession(existing);
       }
       return;
     }
@@ -622,8 +837,9 @@ function openRoom(cfg) {
   rooms.set(cfg.name, r);
   const connect = () => {
     if (r.closed) return;
+    let opened = false;
     const ws = r.ws = new WebSocket(`${wsBase(host)}/ws?room=${encodeURIComponent(cfg.name)}&k=${encodeURIComponent(key)}&role=bridge&name=bridge`);
-    ws.onopen = () => { log(`#${cfg.name}`, "connected", "cwd", cfg.cwd, cfg.model ? "model " + cfg.model : ""); r.send(sessionEvent(r)); r.send({ type: "agents", list: agents }); if (lastUsage) r.send(lastUsage); r.send({ type: "colors", colors: userColors }); 
+    ws.onopen = () => { opened = true; r.fails = 0; log(`#${cfg.name}`, "connected", "cwd", cfg.cwd, cfg.model ? "model " + cfg.model : ""); sendSession(r); r.send({ type: "agents", list: agents }); r.send(commandList()); if (lastUsage) r.send(lastUsage); r.send({ type: "colors", colors: userColors }); 
       // Always reassert known auth state on (re)connect, even "in": a room can be showing a stale "signed out" card
       // from before a bridge restart, and the old `!== "in"` guard here meant a healthy restart never corrected it —
       // only a room that already agreed nothing was wrong got told nothing (2026-09-29, Mike stuck on a stale card).
@@ -636,7 +852,7 @@ function openRoom(cfg) {
       // at all, despite starting with the exact same unguarded JSON.parse.
       try {
       const m = JSON.parse(ev.data);
-      if (m.type === "refresh") { refreshLive(false); return; }
+      if (m.type === "refresh") { refreshLive(false); sendCommands(true); return; } // forced: a redeployed Worker forgets what it was sent
       if (m.type === "upload") { handleUpload(r, m); return; }
       if (m.type === "unqueue") { const n = r.queue.length; r.queue = r.queue.filter(x => x.id !== m.id); r.seen.add(m.id); if (r.queue.length < n) { log(`#${cfg.name}`, "unqueued", String(m.id).slice(0, 8)); saveQueue(r); } return; }
       if (m.type === "browser-click") { handleBrowserClick(r, m); return; }
@@ -644,6 +860,9 @@ function openRoom(cfg) {
         // the room DO replays its outbox on every bridge reconnect; anything already on disk (loadQueue) or mid-run must not run twice
         if (isDuplicateSay(r, m)) return; rememberSay(r, m.id); r.lastActivity = Date.now();
         const hadColor = !!userColors[m.from]; assignColor(m.from); if (!hadColor && userColors[m.from]) r.send({ type: "colors", colors: { [m.from]: userColors[m.from] } }); // new user: tell the room now, not on the next reconnect
+        if (m.role === "owner" && !/^\/compact\b/i.test((m.text || "").trim())) r.autoRuns = 0; // only a person in charge resets the unattended-turn cap
+        if (m.role === "driver" && maMode(r) === "full") marathonOff(r, `Marathon back to default: ${m.from} (a guest) posted, and keep-going turns run with owner rights unattended. An owner can \`/marathon on\` again.`);
+        if (m.role === "owner" && /^\/marathon\b/i.test((m.text || "").trim())) { marathonCmd(r, (m.text || "").trim().split(/\s+/)[1] || "", m.from, m.id); return; }
         if (isCompactCommand(m.text)) { r.compactWanted = "requested by " + m.from; r.compactFor = m.id; pump(r); return; }
         // a "no, ..." or "that's not it" shortly after a light/medium turn means the router undershot — feed it to
         // the nightly self-tuner (tune-router.mjs) so the thresholds correct without a code change.
@@ -655,10 +874,15 @@ function openRoom(cfg) {
       }
       else if (m.type === "login") { startLogin(m.by); }                      // owner-only: the Worker never relays this from a driver or viewer
       else if (m.type === "login-code") { loginCode(m.code); }
-      else if (m.type === "stop" && r.child) { log(`#${cfg.name}`, "stop by", m.by); r.stopped = true; setTimeout(() => r.stopped = false, 10000); r.child.kill("SIGINT"); const c = r.child; setTimeout(() => c && !c.killed && c.kill("SIGKILL"), 3000); }
+      else if (m.type === "marathon") { if (!!m.on === (maMode(r) !== "off")) sendSession(r); else marathonCmd(r, m.on ? "auto" : "off", m.by || "owner"); } // hub relays this for owners only
+      else if (m.type === "demote" && Array.isArray(m.ids)) demote(r, m); // an invite was demoted or revoked: its sender's pending work loses the old rights
+      else if (m.type === "stop" && !r.child && (r.queue.some(x => String(x.id).startsWith("mara-")) || maOf(r)?.paused || maMode(r) === "full")) { // between turns: drop queued continuations and any pause, or it comes back on its own
+        log(`#${cfg.name}`, "stop by", m.by, "(between turns)"); marathonOff(r, maMode(r) === "full" ? `Marathon back to default — stopped by ${m.by}. \`/marathon on\` picks it back up.` : maOf(r)?.paused ? `Marathon pause cleared — stopped by ${m.by}.` : null); }
+      else if (m.type === "stop" && r.child) { log(`#${cfg.name}`, "stop by", m.by); r.stopped = true; if (maMode(r) === "full") marathonOff(r, `Marathon back to default — stopped by ${m.by}. \`/marathon on\` picks it back up.`); else if (maMode(r) === "auto") marathonOff(r, null); setTimeout(() => r.stopped = false, 10000); r.child.kill("SIGINT"); const c = r.child; setTimeout(() => c && !c.killed && c.kill("SIGKILL"), 3000); }
       } catch (e) { log(`#${cfg.name}`, "room message error (ignored, bridge stays up):", e.message); }
     };
-    ws.onclose = () => { if (!r.closed) { log(`#${cfg.name}`, "disconnected, retrying"); r.timer = setTimeout(connect, 3000); } };
+    // a socket that never opened (key rejected, host disabled, hub down) backs off 3s → 6 → 12 … 60s instead of hammering the hub
+    ws.onclose = () => { if (!r.closed) { if (!opened) r.fails = (r.fails | 0) + 1; const wait = backoff(r.fails); log(`#${cfg.name}`, "disconnected, retrying in", wait / 1000 + "s"); r.timer = setTimeout(connect, wait); } };
     ws.onerror = e => { log(`#${cfg.name}`, "ws error", e.message || e.error?.code || e.error?.message || ""); };
   };
   connect(); return r;
@@ -704,9 +928,12 @@ function purgeTestRoom(name) {
 }
 
 /* ── hub: room registry ── */
+const backoff = fails => fails ? Math.min(60000, 3000 * 2 ** Math.min(fails - 1, 5)) : 3000;
+let hubFails = 0;
 function connectHub() {
+  let opened = false;
   const ws = hubWs = new WebSocket(`${wsBase(host)}/hub?k=${encodeURIComponent(key)}&role=bridge`);
-  ws.onopen = () => { log("hub connected", host, only.length ? "only " + only.join(",") : ""); if (M.catalog) ws.send(JSON.stringify(M.catalog)); if (lastPlan) ws.send(JSON.stringify(lastPlan)); };
+  ws.onopen = () => { opened = true; hubFails = 0; log("hub connected", host, only.length ? "only " + only.join(",") : ""); if (M.catalog) ws.send(JSON.stringify(M.catalog)); if (lastPlan) ws.send(JSON.stringify(lastPlan)); };
   ws.onmessage = ev => {
     // A thrown error anywhere in this handler propagates straight through the WebSocket's dispatchEvent and kills
     // the whole bridge (this is exactly how the 2026-09-28 outage happened) — belt and suspenders: every branch
@@ -721,10 +948,11 @@ function connectHub() {
       else if (m.type === "refresh") refreshLive(true); // lobby: no plan meters there, catalog only
     } catch (e) { log("hub message error (ignored, bridge stays up):", e.message); }
   };
-  ws.onclose = () => { log("hub disconnected, retrying"); setTimeout(connectHub, 3000); };
+  ws.onclose = () => { if (!opened) hubFails++; const wait = backoff(hubFails); log("hub disconnected, retrying in", wait / 1000 + "s", hubFails > 2 ? "(key rejected or hub unreachable?)" : ""); clearInterval(hubPing); setTimeout(connectHub, wait); };
   ws.onerror = e => log("hub ws error", e.message || e.error?.code || e.error?.message || "");
-  setInterval(() => { try { ws.readyState === 1 && ws.send(JSON.stringify({ type: "ping" })); } catch {} }, 30000);
+  hubPing = setInterval(() => { try { ws.readyState === 1 && ws.send(JSON.stringify({ type: "ping" })); } catch {} }, 30000);
 }
+let hubPing = null;
 connectHub();
 setInterval(refreshCatalog, 60 * 60 * 1000); refreshCatalog();
 // a bridge that comes up logged out would otherwise fail every turn in a row before anyone knew why
@@ -743,7 +971,9 @@ setInterval(refreshCatalog, 60 * 60 * 1000); refreshCatalog();
 if (process.ppid === 1 || process.env.JAM_AUTORESTART) {
   setInterval(pollUsage, USAGE_MS); pollUsage();
   const { watchFile } = await import("node:fs");
-  const files = [fileURLToPath(import.meta.url), hookPath, ...["route.mjs", "catalog.mjs", "schedule.mjs", "tune-router.mjs", "budget.mjs", "sandbox.mjs", "turntext.mjs", "turn-events.mjs", "turn-policy.mjs", "models.mjs", "session-store.mjs", "compaction.mjs", "room-dispatch.mjs", "uploads.mjs", "schedule-cli.mjs", "jam-url.mjs", "sandbox/driver.sb", "sandbox/bashwrap.sh"].map(f => path.join(here, f))]; // static imports: a change needs a restart too
+  // every local static import (read from this file, so a new module can't be forgotten — marathon.mjs/turntext.mjs were)
+  const imports = [...readFileSync(fileURLToPath(import.meta.url), "utf8").matchAll(/^import [^\n]* from "\.\/([^"]+)";/gm)].map(m => m[1]);
+  const files = [fileURLToPath(import.meta.url), hookPath, ...[...imports, "sandbox/driver.sb", "sandbox/bashwrap.sh"].map(f => path.join(here, f))];
   let want = false, wantSince = 0;
   for (const f of files) watchFile(f, { interval: 5000 }, () => { if (!want) { log("code changed on disk — will restart when idle"); wantSince = Date.now(); } want = true; });
   // A stuck room (2026-10-08: a 15+ min turn) used to make this wait forever — a real fix sat undeployed in

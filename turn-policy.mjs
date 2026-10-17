@@ -48,11 +48,13 @@ export function decideResult({ ev, text, fresh, item }) {
 //   crashRetry        any other crash: retry once, one weight heavier
 //   error             stopped by the user (code null), already retried, or stopped within the grace window
 // `code === null` means we killed it: a user Stop or shutdown is never retried as a crash; a watchdog kill (item.watchdogKilled) is.
-export function decideNoResult({ item, fresh, stopped, code, stderr }) {
+// `resumable`: the session's transcript is on disk. A killed turn whose stderr merely mentions "session" must not abandon a session that can
+// still be resumed (2026-10-16: two marathon cuts in a long-running room lost ~45 min of context that way).
+export function decideNoResult({ item, fresh, stopped, code, stderr, resumable = false }) {
   const err = String(stderr || "");
   if (item.retryFresh) return "retryFresh";
   if (SESSION_LOCKED_RE.test(err) && !item.retriedLocked) return "lockedAbandon";
-  if (!fresh && /No conversation found|session/i.test(err) && !item.retried) return "sessionNotFound";
+  if (!fresh && /No conversation found|session/i.test(err) && !item.retried && !resumable) return "sessionNotFound";
   // A watchdog kill (stuck turn, SIGTERM) also exits with code null, but unlike a user Stop it told the room "it'll retry once automatically"
   // (2026-10-09 review: it never did, because only a non-null exit code counted as a crash). The bridge marks the item before killing it.
   const crashed = code !== null || !!item.watchdogKilled;

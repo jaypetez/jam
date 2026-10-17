@@ -44,7 +44,7 @@ if command -v wrangler >/dev/null 2>&1; then
 else
   [ -n "$CF_ACCOUNT_ID" ] || { echo "No wrangler and no CF_ACCOUNT_ID in .env. Either 'npm i -g wrangler && wrangler login' or fill in .env with CF_ACCOUNT_ID and CF_API_TOKEN."; exit 1; }
   # first API deploy must create both DO classes
-  JAM_MIGRATION='{"new_tag":"v1","new_sqlite_classes":["Room","Hub"]}' ./deploy.sh
+  JAM_MIGRATION='{"new_tag":"v2","steps":[{"new_sqlite_classes":["Room","Hub"]},{"new_sqlite_classes":["Registry"]}]}' ./deploy.sh
   SUBDOMAIN=$(resolve_subdomain "$CF_ACCOUNT_ID")
 fi
 

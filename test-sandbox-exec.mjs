@@ -134,10 +134,10 @@ ok(driverSandbox(room, "x", base, { env: { JAM_DRIVER_SANDBOX: "off" } }) === nu
 // wiring in the bridge itself
 const bridge = fs.readFileSync(path.join(REPO, "bridge.mjs"), "utf8");
 ok(/item\.role === "driver"[^\n]*wrapDriver\(/.test(bridge), "bridge builds the sandbox env for driver turns");
-ok(/spawn\(sbErr \? "\/usr\/bin\/false" : claudeBin/.test(bridge), "bridge refuses (spawns nothing) when the sandbox can't be built");
+ok(/spawn\(\.\.\.\(sbErr \? \["\/usr\/bin\/false", args\] : claudeCmd\(args\)\)/.test(bridge), "bridge refuses (spawns nothing) when the sandbox can't be built");
 ok(/env: sb \? sb\.env : env/.test(bridge), "bridge gives the driver's claude the sandbox env");
 ok(/command: HOOK_CMD/.test(bridge), "bridge registers the same HOOK_CMD the wrapper passes through");
-ok(/"sandbox\.mjs", "sandbox\/driver\.sb", "sandbox\/bashwrap\.sh"/.test(bridge), "bridge self-restart watches the sandbox files");
+ok(/^import [^\n]* from "\.\/sandbox\.mjs";/m.test(bridge) && /\.\.\.imports, "sandbox\/driver\.sb", "sandbox\/bashwrap\.sh"/.test(bridge), "bridge self-restart watches the sandbox files (sandbox.mjs via its derived import list)");
 
 clean(); fs.rmSync(room, { recursive: true, force: true }); try { fs.rmSync(sb.scratch, { recursive: true, force: true }); } catch {}
 console.log(`\n${pass}/${pass + fail} passed.`); process.exit(fail ? 1 : 0);

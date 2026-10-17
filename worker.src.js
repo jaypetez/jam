@@ -8,6 +8,23 @@ const MAX_LOG = 5000;
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 const bad = (msg, status = 400) => json({ ok: false, error: msg }, status);
 
+// ── tenants ("hosts"): other people run their own bridge, on their own Claude, against this hub. Tenant "" is the root
+// (the deployment owner, env.JAM_KEY) and keeps the original ids; tenant T gets Hub "t:T" and Rooms "t:T:<room>" —
+// roomName() strips ":" and tenant names are [a-z0-9], so no two tenants' ids can collide. These four helpers are the
+// ONLY places a DO id is derived (check.sh fails the build on any other idFromName): an id built anywhere else would
+// silently land a tenant in the root's data.
+const TENANT_RE = /^[a-z0-9]{3,20}$/;
+const RESERVED_TENANTS = new Set(["registry", "hub", "root", "admin", "api", "jam", "www", "null", "nullagency", "test"]);
+const ROOM_CAP = 20, CODE_TTL = 7 * 86400e3;
+const hubId = (env, tn) => env.HUB.idFromName(tn ? "t:" + tn : "hub");
+const roomId = (env, tn, name) => env.ROOM.idFromName(tn ? "t:" + tn + ":" + name : name);
+const registryId = env => env.REGISTRY.idFromName("registry");
+const hubFor = (env, tn) => env.HUB.get(hubId(env, tn));
+const roomFor = (env, tn, name) => env.ROOM.get(roomId(env, tn, name));
+const registry = env => env.REGISTRY.get(registryId(env));
+const tHdr = tn => ({ "x-jam-tenant": tn || "" });
+async function sha256hex(s) { return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map(b => b.toString(16).padStart(2, "0")).join(""); }
+
 /* ───────────────────────────── Hub ───────────────────────────── */
 export class Hub {
   constructor(state, env) { this.state = state; this.env = env; this.rooms = null; this.tokens = null; this.revoked = null; this.sponsor = null; this.catalog = null; this.plan = null; this.spend = null; this.roomOrder = null; }
@@ -23,14 +40,13 @@ export class Hub {
   // the durable revoked/tokens write already happened by the time this runs, so a false-negative here only
   // means an already-open tab stays connected until its next reconnect, not that revocation itself failed.
   // tell a driver's open tabs their budget changed (owner edit) — best effort, their next message re-checks anyway
-  async pushBudget(t) {
+  async pushBudget(t, tn) {
     const v = this.tokens[t]; if (!v || v.role !== "driver") return;
-    try { await this.env.ROOM.get(this.env.ROOM.idFromName(v.room)).fetch("https://room/budget-push", { method: "POST", body: JSON.stringify({ token: t, view: driverView(budgetStatus(v.budget, this.spend[t], this.plan)) }) }); } catch {}
+    try { await roomFor(this.env, tn, v.room).fetch("https://room/budget-push", { method: "POST", headers: tHdr(tn), body: JSON.stringify({ token: t, view: driverView(budgetStatus(v.budget, this.spend[t], this.plan)) }) }); } catch {}
   }
-  async kickRoom(room, t) {
-    const id = this.env.ROOM.idFromName(room);
+  async kickRoom(room, t, tn, reload) { // reload = the invite's new role: its tabs reconnect instead of showing "revoked"
     for (let i = 0; i < 2; i++) {
-      try { const r = await this.env.ROOM.get(id).fetch("https://room/kick", { method: "POST", body: JSON.stringify({ token: t }) }); if (r.ok) return true; } catch {}
+      try { const r = await roomFor(this.env, tn, room).fetch("https://room/kick", { method: "POST", headers: tHdr(tn), body: JSON.stringify({ token: t, reload: reload || null }) }); if (r.ok) return true; } catch {}
     }
     return false;
   }
@@ -39,6 +55,26 @@ export class Hub {
     await this.load();
     const url = new URL(req.url);
     const p = url.pathname;
+    // Which tenant this Hub serves comes from the caller (router / a Room DO), and is checked against this DO's own id:
+    // a missing or wrong header can never make a tenant's hub act on the root's rooms, or the other way round.
+    const tn = req.headers.get("x-jam-tenant") || "";
+    if (!this.state.id.equals(hubId(this.env, tn))) return bad("tenant mismatch", 500);
+
+    if (p === "/kick-all" && req.method === "POST" && !tn) return bad("never the root", 403);
+    if (p === "/kick-all" && req.method === "POST") { // internal: the host was disabled — close every socket, here and in each of its rooms
+      for (const ws of this.state.getWebSockets()) { try { ws.close(4003, "host disabled"); } catch {} }
+      for (const name of Object.keys(this.rooms)) { try { await roomFor(this.env, tn, name).fetch("https://room/drop", { method: "POST", headers: tHdr(tn), body: JSON.stringify({ all: true }) }); } catch {} }
+      return json({ ok: true });
+    }
+    if (p === "/wipe-all" && req.method === "POST") { // internal: a disabled host is being deleted — every room's transcript, then this hub's own storage
+      if (!tn) return bad("never the root", 403);
+      let failed = 0; // a room left unwiped would hand its transcript to whoever claims this host name next — so any failure fails the delete
+      for (const name of Object.keys(this.rooms)) { try { const r = await roomFor(this.env, tn, name).fetch("https://room/wipe", { method: "POST", headers: tHdr(tn), body: JSON.stringify({ deleted: true }) }); if (!r.ok) failed++; } catch { failed++; } }
+      if (failed) return bad(failed + " room(s) could not be wiped — try again", 500);
+      for (const ws of this.state.getWebSockets()) { try { ws.close(4003, "host deleted"); } catch {} }
+      await this.state.storage.deleteAll(); this.rooms = null; await this.load();
+      return json({ ok: true });
+    }
 
     // ── websocket: bridge or owner lobby ──
     if (p === "/hub") {
@@ -46,7 +82,7 @@ export class Hub {
       const role = url.searchParams.get("role") === "bridge" ? "bridge" : "lobby";
       const pair = new WebSocketPair(); const [client, server] = Object.values(pair);
       this.state.acceptWebSocket(server, [role]);
-      server.serializeAttachment({ role, t: Date.now() });
+      server.serializeAttachment({ role, t: Date.now(), tenant: tn });
       server.send(JSON.stringify({ type: "rooms", rooms: this.publicRooms(), bridge: this.bridgeOnline() }));
       if (role === "bridge") this.broadcast({ type: "bridge", on: true }, "lobby");
       else this.broadcast({ type: "refresh" }, "bridge"); // a lobby opened: have the bridge re-read the model catalog (throttled bridge-side)
@@ -86,6 +122,7 @@ export class Hub {
     }
     if (p === "/rooms" && req.method === "POST") {
       const b = await req.json().catch(() => ({}));
+      if (tn && Object.keys(this.rooms).length >= ROOM_CAP) return bad(`room limit reached (${ROOM_CAP} per host) — delete one first`, 403);
       const parsed = parseNewRoom(b, n => !!this.rooms[n]); if (parsed.error) return bad(parsed.error, parsed.status);
       const name = parsed.room.name, r = { ...parsed.room, created: Date.now(), updated: Date.now() };
       this.rooms[name] = r; await this.save();
@@ -118,6 +155,7 @@ export class Hub {
       const b = await req.json().catch(() => ({}));
       r.lastSeq = Math.max(r.lastSeq | 0, b.seq | 0); r.lastMsgAt = b.ts || Date.now();
       this.broadcast({ type: "room.change", op: "update", room: r }, "lobby");
+      if (tn) { try { await registry(this.env).fetch("https://reg/touch", { method: "POST", body: JSON.stringify({ tenant: tn }) }); } catch {} } // per-host activity count, for the root's Hosts list (their DO usage bills to this deployment)
       return json({ ok: true });
     }
     if ((m = /^\/rooms\/([^/]+)\/presence$/.exec(p)) && req.method === "POST") { // internal only — a Room DO reporting its currently-connected users, for the lobby online indicator.
@@ -134,7 +172,7 @@ export class Hub {
       for (const [t, v] of Object.entries(this.tokens)) if (v.room === name) { delete this.tokens[t]; delete this.spend[t]; }
       await this.save(); await this.state.storage.put("spend", this.spend); this.broadcast({ type: "room.change", op: "remove", room: r });
       // forget the transcript too — otherwise a room created later with the same name inherits the old conversation
-      try { await this.env.ROOM.get(this.env.ROOM.idFromName(name)).fetch("https://room/wipe", { method: "POST", body: JSON.stringify({ deleted: true }) }); } catch {}
+      try { await roomFor(this.env, tn, name).fetch("https://room/wipe", { method: "POST", headers: tHdr(tn), body: JSON.stringify({ deleted: true }) }); } catch {}
       return json({ ok: true });
     }
     if ((m = /^\/rooms\/([^/]+)\/rename$/.exec(p)) && req.method === "POST") {
@@ -145,13 +183,13 @@ export class Hub {
       // so its message counter restarts at 0 — carrying the old lastSeq forward would either flood a false unread badge
       // (this device has never "seen" the new name) or freeze the badge for a long time once the fresh counter falls behind it
       const r = { ...old, name: to, cwd: String(b.cwd || old.cwd).slice(0, 300), updated: Date.now(), lastSeq: 0, lastMsgAt: null };
-      const src = this.env.ROOM.get(this.env.ROOM.idFromName(from)), dst = this.env.ROOM.get(this.env.ROOM.idFromName(to));
-      const dump = await (await src.fetch("https://room/dump")).json();
-      const imp = await dst.fetch("https://room/import", { method: "POST", body: JSON.stringify(dump) }); if (!imp.ok) return bad("import failed", 500);
+      const src = roomFor(this.env, tn, from), dst = roomFor(this.env, tn, to);
+      const dump = await (await src.fetch("https://room/dump", { headers: tHdr(tn) })).json();
+      const imp = await dst.fetch("https://room/import", { method: "POST", headers: tHdr(tn), body: JSON.stringify(dump) }); if (!imp.ok) return bad("import failed", 500);
       delete this.rooms[from]; this.rooms[to] = r; this.roomOrder = (this.roomOrder || []).map(n => n === from ? to : n);
       for (const v of Object.values(this.tokens)) if (v.room === from) v.room = to;
       await this.save();
-      await src.fetch("https://room/wipe", { method: "POST", body: JSON.stringify({ to }) });
+      await src.fetch("https://room/wipe", { method: "POST", headers: tHdr(tn), body: JSON.stringify({ to }) });
       this.broadcast({ type: "room.change", op: "remove", room: old }); this.broadcast({ type: "room.change", op: "add", room: r });
       return json({ ok: true, room: r, entries: (dump.entries || []).length });
     }
@@ -165,10 +203,19 @@ export class Hub {
         const b = await req.json().catch(() => ({}));
         const role = ROLES.has(b.role) ? b.role : "driver";
         const name = String(b.name || "").trim().slice(0, 32) || null;
-        const t = token(); this.tokens[t] = { room, name, role, created: Date.now(), by: String(b.by || "owner").slice(0, 32) };
+        const t = (tn ? tn + "." : "") + token(); this.tokens[t] = { room, name, role, created: Date.now(), by: String(b.by || "owner").slice(0, 32) }; // a host's invite names its hub ("T.<token>"), so the router knows where to resolve it
         await this.save();
         return json({ ok: true, token: t, invite: { token: t, ...this.tokens[t] } });
       }
+    }
+    if ((m = /^\/rooms\/([^/]+)\/invites\/([^/]+)$/.exec(p)) && req.method === "POST") { // change an invite's role in place; its open tabs reload with the new role
+      if (req.headers.has("x-jam-scope")) return bad("only the host owner can change roles", 403); // an owner-by-invite can mint links but never re-role (or demote) another owner
+      const room = roomName(m[1]), t = m[2]; const v = Object.hasOwn(this.tokens, t) ? this.tokens[t] : null; if (!v || v.room !== room || this.revoked[t]) return bad("no such invite", 404);
+      const b = await req.json().catch(() => ({})); if (!ROLES.has(b.role)) return bad("role must be owner, driver or viewer");
+      if (v.role === b.role) return json({ ok: true, invite: { token: t, ...v }, changed: false, reloaded: true });
+      v.role = b.role; v.roleChanged = Date.now(); if (this.lastView) delete this.lastView[t]; await this.save();
+      const reloaded = await this.kickRoom(v.room, t, tn, b.role); // also re-roles (or drops) that person's queued and marathon work — a demotion has to take their pending turns with it
+      return json({ ok: true, invite: { token: t, ...v }, changed: true, reloaded });
     }
     // ── per-driver budgets (budget.mjs): owner reads/sets one invite's share of the host plan; Rooms check before a
     //    driver's message runs and report its cost after. /budget/* is internal (blocked in the public router). ──
@@ -185,7 +232,7 @@ export class Hub {
           if (!Number.isFinite(share) || share < 0 || share > 100) return bad("share must be 0–100, or null for no limit");
           v.budget = { share, downshift: "downshift" in b ? !!b.downshift : v.budget ? !!v.budget.downshift : true, updated: Date.now() };
         }
-        await this.save(); await this.pushBudget(t);
+        await this.save(); await this.pushBudget(t, tn);
       } else if (req.method !== "GET") return bad("method not allowed", 405);
       return json({ ok: true, invite: { token: t, ...v }, status: budgetStatus(v.budget, this.spend[t], this.plan), spends: (this.spend[t] || []).slice(-25).reverse(), plan: this.plan ? { limits: this.plan.limits, ts: this.plan.ts } : null, light: this.catalog?.tiers?.light || null, lightLabel: (this.catalog?.models || []).find(x => x.id === this.catalog?.tiers?.light)?.label || null });
     }
@@ -207,14 +254,14 @@ export class Hub {
       delete this.tokens[t]; if (this.spend[t]) { delete this.spend[t]; await this.state.storage.put("spend", this.spend); } await this.save();
       // kick live sockets using this token — the invite record is already gone either way, so a failed
       // kick just means a currently-open tab stays connected until it reconnects; surface that to the caller
-      const kicked = await this.kickRoom(v.room, t);
+      const kicked = await this.kickRoom(v.room, t, tn);
       return json({ ok: true, kicked });
     }
     if ((m = /^\/revoke\/([^/]+)$/.exec(p)) && req.method === "POST") {
       const t = m[1]; const v = this.tokens[t]; if (!v) return bad("no such token", 404);
       this.revoked[t] = true; await this.save(); // durable revocation happens first and unconditionally —
       // a failed kick below must never look like a failed revoke; the token is dead for any *new* connection either way
-      const kicked = await this.kickRoom(v.room, t);
+      const kicked = await this.kickRoom(v.room, t, tn);
       return json({ ok: true, kicked });
     }
     return bad("not found", 404);
@@ -230,7 +277,7 @@ export class Hub {
       const pl = cleanPlan(m); if (!pl || pl.ts === this.plan?.ts) return;
       this.plan = pl; await this.state.storage.put("plan", pl);
       this.lastView = this.lastView || {}; // the host drawing the plan down or a window resetting changes a driver's allowance: tell their tabs (only when their view actually changed)
-      for (const [t, v] of Object.entries(this.tokens)) if (v.role === "driver" && v.budget) { const sig = JSON.stringify(driverView(budgetStatus(v.budget, this.spend[t], this.plan))); if (this.lastView[t] !== sig) { this.lastView[t] = sig; await this.pushBudget(t); } }
+      for (const [t, v] of Object.entries(this.tokens)) if (v.role === "driver" && v.budget) { const sig = JSON.stringify(driverView(budgetStatus(v.budget, this.spend[t], this.plan))); if (this.lastView[t] !== sig) { this.lastView[t] = sig; await this.pushBudget(t, who.tenant || ""); } }
     }
     if (who.role === "lobby" && m.type === "rooms.list") { try { ws.send(JSON.stringify({ type: "rooms", rooms: this.publicRooms(), bridge: this.bridgeOnline() })); } catch {} }
   }
@@ -242,6 +289,10 @@ export class Hub {
 }
 
 /* ───────────────────────────── Room ───────────────────────────── */
+// Bridge state the Room mirrors (re-sent by the bridge on every connect, but a reload must show it before then) and their empty values.
+// saveMeta() and load() both walk THIS list: hand-written save/load lines drifted twice — `commands` was saved but never read back, then an
+// inline // comment swallowed six restores, so every Durable Object eviction blanked them (2026-10-17). room-meta.test.mjs round-trips it.
+const ROOM_MIRRORS = () => ({ agents: [], commands: null, schedules: [], usage: null, auth: null, catalog: null, ctx: null, session: null });
 export class Room {
   constructor(state, env) {
     this.state = state; this.env = env;
@@ -281,11 +332,12 @@ export class Room {
     // otherwise replay up to 9 already-bumped message ordinals and Math.max on the Hub side would swallow them.
     // The loaded log tail always has the true high-water mark, so take whichever is higher.
     for (const e of this.log) if (e._m > this.msgSeq) this.msgSeq = e._m;
-    this.status = meta.status || this.status; this.agents = meta.agents || []; this.schedules = meta.schedules || []; this.usage = meta.usage || null; this.auth = meta.auth || null; this.catalog = meta.catalog || null; this.ctx = meta.ctx || null; this.session = meta.session || null;
+    this.status = meta.status || this.status; for (const [k, d] of Object.entries(ROOM_MIRRORS())) this[k] = meta[k] || d; // every bridge mirror, from the same list saveMeta writes
     for (const e of Object.values(meta.pending || {})) this.pending[e.id] = { entry: e, waiters: [] }; // survive DO eviction
     this.outbox = meta.outbox || [];
     this.colors = meta.colors || {};
     this.turnTok = meta.turnTok || {};
+    this.sayTok = meta.sayTok || {}; this.demotes = meta.demotes || []; // say id → sender's invite token (any role, never broadcast); recent demotions, re-sent to every bridge that connects
     if (!this.bridges().length) { this.status.running = false; this.status.current = null; }
     if (typeof meta.costTotal === "number") this.costTotal = meta.costTotal;
     else { // first load after this field shipped: backfill from every stored entry (whatever is still within MAX_LOG retention), then make it durable
@@ -296,7 +348,7 @@ export class Room {
   }
   async saveMeta() {
     const pending = {}; for (const [id, p] of Object.entries(this.pending)) pending[id] = p.entry;
-    await this.state.storage.put("meta", { status: this.status, agents: this.agents, schedules: this.schedules, usage: this.usage, auth: this.auth, catalog: this.catalog, ctx: this.ctx, session: this.session, pending, outbox: this.outbox.slice(-20), seq: this.seq, msgSeq: this.msgSeq, colors: this.colors, costTotal: this.costTotal, turnTok: Object.fromEntries(Object.entries(this.turnTok).slice(-100)) });
+    await this.state.storage.put("meta", { status: this.status, ...Object.fromEntries(Object.keys(ROOM_MIRRORS()).map(k => [k, this[k] ?? null])), pending, outbox: this.outbox.slice(-20), seq: this.seq, msgSeq: this.msgSeq, colors: this.colors, costTotal: this.costTotal, turnTok: Object.fromEntries(Object.entries(this.turnTok).slice(-100)), sayTok: Object.fromEntries(Object.entries(this.sayTok || {}).slice(-300)), demotes: (this.demotes || []).filter(d => Date.now() - d.ts < 7 * 86400e3).slice(-20) });
   }
   key(n) { return "e:" + String(n).padStart(12, "0"); }
 
@@ -334,21 +386,23 @@ export class Room {
   // the subrequest isn't cancelled the instant the handler returns — a failed call just means the badge lags
   // until the next message, never worth failing the turn over.
   // per-driver budgets live on the Hub (with the invite); a Room asks before a driver's message runs and reports its cost after
-  async budget(path, body) {
-    try { const r = await this.env.HUB.get(this.env.HUB.idFromName("hub")).fetch("https://hub/budget/" + path, { method: "POST", body: JSON.stringify(body) }); return r.ok ? await r.json() : null; } catch { return null; }
+  // every Hub call names the tenant this room belongs to — taken from the socket attachment the router set, never stored
+  hubPost(tn, path, body) { return hubFor(this.env, tn).fetch("https://hub" + path, { method: "POST", headers: tHdr(tn), body: JSON.stringify(body) }); }
+  async budget(path, body, tn) {
+    try { const r = await this.hubPost(tn, "/budget/" + path, body); return r.ok ? await r.json() : null; } catch { return null; }
   }
   sendToToken(t, obj) { for (const u of this.users()) if ((u.deserializeAttachment() || {}).token === t) this.send(u, obj); }
-  async bumpActivity(room) {
+  async bumpActivity(room, tn) {
     if (!room) return;
-    try { await this.env.HUB.get(this.env.HUB.idFromName("hub")).fetch("https://hub/rooms/" + encodeURIComponent(room) + "/activity", { method: "POST", body: JSON.stringify({ seq: this.msgSeq, ts: Date.now() }) }); } catch {}
+    try { await this.hubPost(tn, "/rooms/" + encodeURIComponent(room) + "/activity", { seq: this.msgSeq, ts: Date.now() }); } catch {}
   }
   // tells the Hub who's currently connected here, so the lobby can show an online indicator per room without
   // opening it. Same best-effort, in-memory-only contract as bumpActivity — a failed call just means the
   // indicator lags until the next connect/disconnect.
-  async reportPresence(room) {
+  async reportPresence(room, tn) {
     if (!room) return;
     const names = [...new Set(this.users().map(w => (w.deserializeAttachment() || {}).name).filter(Boolean))];
-    try { await this.env.HUB.get(this.env.HUB.idFromName("hub")).fetch("https://hub/rooms/" + encodeURIComponent(room) + "/presence", { method: "POST", body: JSON.stringify({ online: names.length, names }) }); } catch {}
+    try { await this.hubPost(tn, "/rooms/" + encodeURIComponent(room) + "/presence", { online: names.length, names }); } catch {}
   }
 
   async fetch(req) {
@@ -361,28 +415,32 @@ export class Room {
       const name = (req.headers.get("x-jam-name") || "anon").slice(0, 32);
       const tok = req.headers.get("x-jam-token") || "";
       const room = req.headers.get("x-jam-room") || "";
+      const tn = req.headers.get("x-jam-tenant") || "";
+      if (!this.state.id.equals(roomId(this.env, tn, room))) return bad("tenant mismatch", 500); // the tenant on the socket is what every later Hub callback trusts
       if (role === "screen") { // live browser view: frames in, fanned out to people, never stored — no hello, no presence
         const pair = new WebSocketPair(); const [client, server] = Object.values(pair);
-        this.state.acceptWebSocket(server, ["screen"]); server.serializeAttachment({ role2: "screen", room, t: Date.now() });
+        this.state.acceptWebSocket(server, ["screen"]); server.serializeAttachment({ role2: "screen", room, tenant: tn, t: Date.now() });
         return new Response(null, { status: 101, webSocket: client });
       }
+      if (tok && this.reroled && this.reroled[tok] >= (+req.headers.get("x-jam-authed") || 0)) return new Response("role changed, reconnect", { status: 409 }); // authed with the old role a moment before a role change
       const tag = role === "bridge" ? "bridge" : "user";
       const pair = new WebSocketPair(); const [client, server] = Object.values(pair);
       this.state.acceptWebSocket(server, [tag]);
-      server.serializeAttachment({ name, role2: role, token: tok, room, t: Date.now() });
-      this.send(server, { type: "hello", you: { name, role }, room, log: this.log.slice(-400), status: this.status, bridge: this.bridges().length > 0, agents: this.agents, schedules: this.schedules, usage: role === "owner" ? this.usage : null, auth: role === "owner" ? this.auth : null, catalog: this.catalog, ctx: this.ctx, session: this.session, approvals: this.pendingList(), queue: this.queueList(), seq: this.seq, msgSeq: this.msgSeq, roomCost: this.costTotal, build: typeof BUILD === "string" ? BUILD : null, partial: this.partial, colors: this.colors });
+      server.serializeAttachment({ name, role2: role, token: tok, room, tenant: tn, t: Date.now() });
+      this.send(server, { type: "hello", you: { name, role }, room, log: this.log.slice(-400), status: this.status, bridge: this.bridges().length > 0, agents: this.agents, commands: this.commands || null, schedules: this.schedules, usage: role === "owner" ? this.usage : null, auth: role === "owner" ? this.auth : null, catalog: this.catalog, ctx: this.ctx, session: this.session, approvals: this.pendingList(), queue: this.queueList(), seq: this.seq, msgSeq: this.msgSeq, roomCost: this.costTotal, build: typeof BUILD === "string" ? BUILD : null, partial: this.partial, colors: this.colors });
       if (role !== "bridge" && this.screen && Date.now() - this.screen.ts < 15000) this.send(server, this.screen); // joined mid-run: show the live view's latest frame right away
-      if (role === "driver" && tok) { const st = await this.budget("check", { t: tok }); if (st && st.limited) this.send(server, { type: "budget", ...driverView(st) }); }
+      if (role === "driver" && tok) { const st = await this.budget("check", { t: tok }, tn); if (st && st.limited) this.send(server, { type: "budget", ...driverView(st) }); }
       if (role === "bridge") {
         // only worth a chat line if it was down long enough for a person to notice — a deploy or a brief
         // network hiccup reconnects in a couple of seconds and shouldn't clutter the transcript
         if (this.bridgeDownAt && Date.now() - this.bridgeDownAt > 8000) this.broadcast({ type: "sys", text: "bridge back online after " + Math.round((Date.now() - this.bridgeDownAt) / 1000) + "s", ts: Date.now() }, "user");
         this.bridgeDownAt = null;
+        for (const d of this.demotes || []) this.send(server, d); // before the outbox: a bridge that was down when someone was demoted still re-roles its persisted queue
         for (const e of this.outbox) this.send(server, e);
       }
       this.presence();
       if (role !== "bridge") this.broadcast({ type: "refresh" }, "bridge"); // every open/reload re-reads plan usage + the model catalog (throttled bridge-side)
-      await this.reportPresence(room);
+      await this.reportPresence(room, tn);
       return new Response(null, { status: 101, webSocket: client });
     }
     if (p === "/history") { // entries before a seq, oldest→newest
@@ -422,24 +480,38 @@ export class Room {
       const { to, deleted } = await req.json().catch(() => ({}));
       if (to) this.broadcast({ type: "moved", to }, "user"); else if (deleted) this.broadcast({ type: "gone" }, "user");
       for (const ws of this.state.getWebSockets()) { try { ws.close(4002, to ? "moved" : "deleted"); } catch {} }
-      await this.clearLog(); this.pending = {}; this.outbox = []; this.session = null; this.agents = []; this.schedules = []; this.status = { running: false, queue: 0, current: null }; this.seq = 0; this.msgSeq = 0; this.partial = null; this.costTotal = 0; this.ctx = null; this.usage = null;
+      await this.clearLog(); this.pending = {}; this.outbox = []; this.session = null; this.agents = []; this.schedules = []; this.status = { running: false, queue: 0, current: null }; this.seq = 0; this.msgSeq = 0; this.partial = null; this.costTotal = 0; this.ctx = null; this.usage = null; this.turnTok = {}; this.sayTok = {}; this.demotes = []; this.reroled = {};
       await this.state.storage.delete("meta");
       return json({ ok: true });
     }
     if (p === "/drop" && req.method === "POST") { // owner tool + test hook: close every browser socket the way a recycled DO would; tabs reconnect on their own
-      let n = 0; for (const ws of this.users()) { try { ws.close(1012, "service restart"); n++; } catch {} }
+      const { all } = await req.json().catch(() => ({})); // all: the host was disabled — bridge and screen sockets too; their reconnect fails auth
+      let n = 0; for (const ws of all ? this.state.getWebSockets() : this.users()) { try { ws.close(all ? 4003 : 1012, all ? "host disabled" : "service restart"); n++; } catch {} }
       return json({ ok: true, closed: n });
     }
     if (p === "/budget-push" && req.method === "POST") { const b = await req.json().catch(() => ({})); if (b.token) this.sendToToken(b.token, { type: "budget", ...(b.view || { limited: false }) }); return json({ ok: true }); }
     if (p === "/kick" && req.method === "POST") {
-      const { token: t } = await req.json();
-      for (const ws of this.users()) { const a = ws.deserializeAttachment() || {}; if (a.token && a.token === t) { this.send(ws, { type: "kicked" }); try { ws.close(4001, "revoked"); } catch {} } }
+      const { token: t, reload } = await req.json();
+      this.reroled = this.reroled || {}; this.reroled[t] = Date.now(); // a socket the router authed before this moment carries the old role: refused on arrival
+      for (const ws of this.users()) { const a = ws.deserializeAttachment() || {}; if (a.token && a.token === t) { this.send(ws, { type: reload ? "reload" : "kicked" }); try { ws.close(reload ? 4004 : 4001, reload ? "role changed" : "revoked"); } catch {} } }
+      { // demoted (or revoked): their queued messages lose the old rights — re-stamped down, or dropped for a viewer/revoke — and the bridge does the same to its queue, marathon chain, pause and running turn
+        const role = ROLES.has(reload) ? reload : "viewer", rank = { viewer: 0, driver: 1, owner: 2 };
+        const ids = Object.keys(this.sayTok || {}).filter(id => this.sayTok[id] === t);
+        if (ids.length) {
+          const idset = new Set(ids), n0 = this.outbox.length;
+          this.outbox = this.outbox.filter(e => !(idset.has(e.id) && role === "viewer")).map(e => idset.has(e.id) && rank[e.role] > rank[role] ? { ...e, role } : e);
+          this.status.queue = Math.max(0, this.status.queue - (n0 - this.outbox.length));
+          const d = { type: "demote", ids, role, ts: Date.now() }; this.demotes = [...(this.demotes || []), d].slice(-20); await this.saveMeta();
+          for (const w of this.bridges()) this.send(w, d);
+          this.broadcast({ type: "status", ...this.status }, "user"); this.broadcast({ type: "queue", items: this.queueList() }, "user");
+        }
+      }
       // presence must exclude the just-closed token; state.getWebSockets() may not have dropped it yet
       const allUsers = this.users().map(w => { const a = w.deserializeAttachment() || {}; return { name: a.name, role: a.role2, token: a.token || "" }; }).filter(u => u.token !== t);
       const bridgeOnline = this.bridges().length > 0;
       for (const ws of this.users()) { const receiver = ws.deserializeAttachment() || {}; const isOwner = receiver.role2 === "owner"; const users = allUsers.map(u => ({ name: u.name, role: u.role, ...(isOwner ? { token: u.token } : {}) })); this.send(ws, { type: "presence", users, bridge: bridgeOnline }); }
-      const room = (this.users()[0]?.deserializeAttachment() || {}).room || "";
-      await this.reportPresence(room);
+      const a0 = this.users()[0]?.deserializeAttachment() || {};
+      await this.reportPresence(a0.room || "", a0.tenant || "");
       return json({ ok: true });
     }
     // approvals, called by the bridge-side hook
@@ -495,7 +567,7 @@ export class Room {
       if (m.type === "say" && canDrive && typeof m.text === "string" && (m.text.trim() || (Array.isArray(m.attachments) && m.attachments.length))) {
         let budgetFlag = null; const isCompact = /^\/compact\b/i.test(m.text.trim());
         if (role === "driver" && who.token) {
-          const st = await this.budget("check", { t: who.token });
+          const st = await this.budget("check", { t: who.token }, who.tenant || "");
           if (!st) console.warn("budget check unavailable — letting", who.name, "through"); // fail open: a Hub hiccup shouldn't lock drivers out
           const live = new Set([...this.outbox.map(e => e.id), this.status.current].filter(Boolean));
           for (const id of Object.keys(this.turnTok)) if (!live.has(id)) delete this.turnTok[id];
@@ -518,6 +590,7 @@ export class Room {
         }
         const attachments = (Array.isArray(m.attachments) ? m.attachments : []).slice(0, 6).map(a => ({ name: String(a.name || "file").slice(0, 120), path: String(a.path || "").slice(0, 400), thumb: typeof a.thumb === "string" && a.thumb.startsWith("data:image/") && a.thumb.length < 60000 ? a.thumb : null }));
         const entry = { type: "say", id: crypto.randomUUID(), from: who.name, role, text: m.text.slice(0, 20000), ts: Date.now(), ...(attachments.length ? { attachments } : {}), ...(budgetFlag ? { budget: budgetFlag } : {}) };
+        if (who.token) this.sayTok[entry.id] = who.token; // so a later demotion can find this message, its marathon continuations and any pause it caused
         if (role === "driver" && who.token) this.turnTok[entry.id] = (isCompact ? "c:" : "") + who.token; // "c:" = charged if it costs, but never counts as the driver's live message
         const seen = { ...entry }; delete seen.budget; // the bridge needs the flag; nobody in the room needs to see a driver is near their budget
         await this.push(seen);
@@ -527,7 +600,7 @@ export class Room {
         const b = this.bridges();
         if (!b.length) this.broadcast({ type: "sys", text: "No bridge connected. Start the bridge on the host machine.", ts: Date.now() }, "user");
         for (const w of b) this.send(w, entry);
-        await this.bumpActivity(who.room); // fan-out above is already synchronous, so ordering is safe; still awaited so the runtime doesn't cancel the subrequest the instant this handler returns
+        await this.bumpActivity(who.room, who.tenant || ""); // fan-out above is already synchronous, so ordering is safe; still awaited so the runtime doesn't cancel the subrequest the instant this handler returns
       } else if (m.type === "unqueue" && canDrive && typeof m.id === "string") {
         const e = this.outbox.find(x => x.id === m.id); if (!e) return;
         if (e.from !== who.name && role !== "owner") return;
@@ -543,6 +616,9 @@ export class Room {
       } else if (m.type === "typing" && canDrive) {
         const s = JSON.stringify({ type: "typing", from: who.name, on: !!m.on });
         for (const w of this.users()) if (w !== ws) { try { w.send(s); } catch {} }
+      } else if (m.type === "marathon" && role === "owner") { // the Turn panel's Marathon switch; the bridge owns the mode and reports it back in "session"
+        const b = this.bridges(); if (!b.length) { this.send(ws, { type: "sys", text: "No bridge connected — Marathon mode didn't change.", ts: Date.now() }); if (this.session) this.send(ws, { type: "session", ...this.session }); return; } // the echo puts the switch back
+        for (const w of b) this.send(w, { type: "marathon", on: m.on === true, by: who.name });
       } else if (m.type === "stop" && canDrive) {
         for (const w of this.bridges()) this.send(w, { type: "stop", by: who.name });
       } else if (m.type === "clear" && role === "owner") {
@@ -573,19 +649,20 @@ export class Room {
         delete this.turnTok[m.id]; // its cost was charged by the "spend" message the bridge sends just before done/error
         this.status.running = false; this.status.current = null; await this.saveMeta();
         this.broadcast({ ...e, roomCost: this.costTotal }, "user"); this.broadcast({ type: "status", ...this.status }, "user"); // roomCost rides the live broadcast only — the stored entry stays per-turn, hello carries the durable total
-        await this.bumpActivity(who.room); // no bridge fan-out on this path, so nothing here to reorder — awaited so the subrequest isn't cancelled on return
+        await this.bumpActivity(who.room, who.tenant || ""); // no bridge fan-out on this path, so nothing here to reorder — awaited so the subrequest isn't cancelled on return
       }
       else if (m.type === "spend") { // every attempt's cost (retries, stops, crashes, a driver's /compact) → the driver who sent that message
         const tt = this.turnTok[m.id]; if (m.final) { delete this.turnTok[m.id]; await this.saveMeta(); }
         const t = tt && tt.startsWith("c:") ? tt.slice(2) : tt;
-        if (t && Number(m.cost) > 0) { const st = await this.budget("spend", { t, cost: m.cost, room: who.room, model: m.model }); if (st && st.limited) this.sendToToken(t, { type: "budget", ...driverView(st) }); }
+        if (t && Number(m.cost) > 0) { const st = await this.budget("spend", { t, cost: m.cost, room: who.room, model: m.model }, who.tenant || ""); if (st && st.limited) this.sendToToken(t, { type: "budget", ...driverView(st) }); }
       }
-      else if (m.type === "session") { this.session = { id: m.id, cwd: m.cwd, model: m.model || null }; await this.saveMeta(); this.broadcast({ type: "session", ...this.session }, "user"); }
+      else if (m.type === "session") { this.session = { id: m.id, cwd: m.cwd, model: m.model || null, tier: m.tier || null, effort: m.effort || null, runLocal: !!m.runLocal, marathon: ["auto", "full", "off"].includes(m.marathon) ? m.marathon : null }; await this.saveMeta(); this.broadcast({ type: "session", ...this.session }, "user"); }
       else if (m.type === "uploaded" || m.type === "upload_error" || m.type === "route" || m.type === "compacted") { if (m.type === "compacted") { const max = +m.ctxMax || this.ctx?.max || 0; this.ctx = max ? { now: +m.ctx || 0, max } : null; await this.saveMeta(); } this.broadcast(m, "user"); }
       else if (m.type === "catalog") { const c = cleanCatalog(m); if (c && c.ts !== this.catalog?.ts) { this.catalog = c; await this.saveMeta(); this.broadcast({ type: "catalog", ...c }, "user"); } }
       else if (m.type === "colors") { this.colors = { ...this.colors, ...(m.colors || {}) }; await this.saveMeta(); this.broadcast({ type: "colors", colors: this.colors }, "user"); }
       else if (m.type === "sys" && m.owners) { const s = JSON.stringify({ type: "sys", text: String(m.text || "").slice(0, 300), ts: Date.now() }); this.toOwners(s); } // host-account details (plan quota): owners only, not stored in the shared log
       else if (m.type === "sys") { const e = { type: "sys", text: String(m.text || "").slice(0, 300), ts: Date.now() }; await this.push(e); this.broadcast(e, "user"); }
+      else if (m.type === "commands") { this.commands = { list: Array.isArray(m.list) ? m.list.slice(0, 400).map(x => String(x).slice(0, 80)) : [], terminal: Array.isArray(m.terminal) ? m.terminal.slice(0, 200).map(x => String(x).slice(0, 80)) : [] }; this.broadcast({ type: "commands", ...this.commands }, "user"); } // in memory only: the bridge resends on every connect
       else if (m.type === "agents") { this.agents = Array.isArray(m.list) ? m.list.slice(0, 40) : []; await this.saveMeta(); this.broadcast({ type: "agents", list: this.agents }, "user"); }
       else if (m.type === "schedules") { this.schedules = Array.isArray(m.list) ? m.list : []; await this.saveMeta(); this.broadcast({ type: "schedules", list: this.schedules }, "user"); }
       else if (m.type === "auth") { // host login state: owners only, and stored so a reload still shows a logged-out host
@@ -608,98 +685,180 @@ export class Room {
     if (who.role2 === "bridge") { this.bridgeDownAt = Date.now(); this.status.running = false; this.status.current = null; await this.saveMeta(); this.broadcast({ type: "status", ...this.status }, "user"); }
     else this.broadcast({ type: "typing", from: who.name, on: false }, "user");
     this.presence(ws);
-    await this.reportPresence(who.room);
+    await this.reportPresence(who.room, who.tenant || "");
   }
   async webSocketError(ws) { return this.webSocketClose(ws); }
 }
 
+/* ───────────────────────────── Registry ───────────────────────────── */
+// Who the hosts are. One instance ("registry"), reached only from the router and from tenant Hubs — never forwarded
+// from a public path. A host's key never reaches us: claim.mjs makes it on their machine and sends only sha256(secret).
+export class Registry {
+  constructor(state, env) { this.state = state; this.env = env; this.tenants = null; this.codes = null; }
+  async load() { if (this.tenants === null) { this.tenants = (await this.state.storage.get("tenants")) || {}; this.codes = (await this.state.storage.get("codes")) || {}; } }
+  async save() { await this.state.storage.put("tenants", this.tenants); await this.state.storage.put("codes", this.codes); }
+  async fetch(req) {
+    await this.load();
+    const p = new URL(req.url).pathname; const b = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const T = this.tenants, C = this.codes, now = Date.now();
+    if (p === "/check") { const t = Object.hasOwn(T, b.tenant) ? T[b.tenant] : null; return json({ ok: !!t && !t.disabled && (b.hash == null || safeEq(String(b.hash), t.hash)) }); }
+    if (p === "/touch") { // counted in memory; written at most once a minute, so a chatty host can't turn this one DO into a write hotspot
+      const t = Object.hasOwn(T, b.tenant) ? T[b.tenant] : null; if (t) { t.msgs = (t.msgs | 0) + 1; t.lastSeen = now; if (!(now - (this.flushed || 0) < 60000)) { this.flushed = now; await this.state.storage.put("tenants", T); } }
+      return json({ ok: true });
+    }
+    if (p === "/claim") { // no await on anything but storage between the checks and the write, so two claims can't both consume one code
+      const code = String(b.code || ""), c = Object.hasOwn(C, code) ? C[code] : null;
+      if (!c || c.used || now - c.created > CODE_TTL) return bad("this host code is invalid, already used, or expired — ask for a new one", 409);
+      const tn = String(b.tenant || "");
+      if (!TENANT_RE.test(tn) || RESERVED_TENANTS.has(tn)) return bad("host name: 3–20 lowercase letters and digits (and not a reserved word)");
+      if (Object.hasOwn(T, tn)) return bad("the host name " + tn + " is taken — pick another", 409);
+      if (!/^[0-9a-f]{64}$/.test(String(b.hash || ""))) return bad("bad key hash");
+      T[tn] = { hash: b.hash, created: now, note: c.note || "", msgs: 0, lastSeen: null, disabled: false };
+      c.used = now; c.tenant = tn; await this.save();
+      return json({ ok: true, tenant: tn });
+    }
+    if (p === "/code") { const code = token(24); C[code] = { created: now, note: String(b.note || "").trim().slice(0, 60), used: null }; await this.save(); return json({ ok: true, code, expires: now + CODE_TTL }); }
+    if (p === "/code-del") { if (Object.hasOwn(C, b.code) && !C[b.code].used) { delete C[b.code]; await this.save(); } return json({ ok: true }); }
+    if (p === "/delete") { if (!Object.hasOwn(T, b.tenant)) return bad("no such host", 404); if (!T[b.tenant].disabled) return bad("disable the host first", 409); delete T[b.tenant]; await this.save(); return json({ ok: true }); }
+    if (p === "/disable") { if (!Object.hasOwn(T, b.tenant)) return bad("no such host", 404); T[b.tenant].disabled = !!b.disabled; await this.save(); return json({ ok: true }); }
+    if (p === "/hosts") {
+      for (const [k, c] of Object.entries(C)) if (!c.used && now - c.created > CODE_TTL + 30 * 86400e3) delete C[k]; // expired codes linger a month for the record, then go
+      const hosts = Object.entries(T).map(([name, t]) => ({ name, created: t.created, note: t.note, msgs: t.msgs | 0, lastSeen: t.lastSeen, disabled: !!t.disabled }));
+      const codes = Object.entries(C).filter(([, c]) => !c.used && now - c.created <= CODE_TTL).map(([code, c]) => ({ code, note: c.note, created: c.created, expires: c.created + CODE_TTL }));
+      return json({ ok: true, hosts, codes });
+    }
+    return bad("not found", 404);
+  }
+}
+
 /* ───────────────────────────── Router ───────────────────────────── */
+const regPost = (env, path, body) => registry(env).fetch("https://reg" + path, { method: "POST", body: JSON.stringify(body) });
+// key shapes: the root's JAM_KEY; a host's owner key "jamo_<tenant>_<secret>"; a host's invite "<tenant>.<token>"; a root invite "<token>"
 async function auth(env, k, room) {
-  // returns { role, name, room, token } or null
+  // returns { tenant, role, name, room, token } or null
   if (!k) return null;
-  if (safeEq(k, env.JAM_KEY)) return { role: "owner", name: null, room: roomName(room), token: "" };
-  const r = await env.HUB.get(env.HUB.idFromName("hub")).fetch("https://hub/resolve?t=" + encodeURIComponent(k));
+  if (safeEq(k, env.JAM_KEY)) return { tenant: "", role: "owner", name: null, room: roomName(room), token: "" };
+  let m, tn = "";
+  if ((m = /^jamo_([a-z0-9]{3,20})_([a-z0-9]{20,64})$/.exec(k))) {
+    const ok = await (await regPost(env, "/check", { tenant: m[1], hash: await sha256hex(m[2]) })).json().catch(() => ({}));
+    return ok.ok ? { tenant: m[1], role: "owner", name: null, room: roomName(room), token: "" } : null;
+  }
+  if ((m = /^([a-z0-9]{3,20})\.[a-z0-9]{6,40}$/.exec(k))) { // a host's invite: dead the moment the host is disabled
+    tn = m[1]; const ok = await (await regPost(env, "/check", { tenant: tn })).json().catch(() => ({})); if (!ok.ok) return null;
+  } else if (!/^[a-z0-9]{6,40}$/.test(k)) return null;
+  const r = await hubFor(env, tn).fetch("https://hub/resolve?t=" + encodeURIComponent(k), { headers: tHdr(tn) });
   if (!r.ok) return null;
   const v = await r.json();
-  return { role: v.role, name: v.name, room: v.room, token: k };
+  return { tenant: tn, role: v.role, name: v.name, room: v.room, token: k };
 }
+const isRoot = a => !!a && a.tenant === "" && a.role === "owner" && !a.token; // the deployment owner: sponsor, hosts
 
 export default {
   async fetch(req, env) {
+    // x-jam-* headers are how the router tells a DO who's calling (tenant, role, room…) — never accept them from outside
+    if ([...req.headers.keys()].some(k => k.startsWith("x-jam-") && k !== "x-jam-key")) { const h0 = new Headers(req.headers); for (const k of [...h0.keys()]) if (k.startsWith("x-jam-") && k !== "x-jam-key") h0.delete(k); req = new Request(req, { headers: h0 }); }
     const url = new URL(req.url); const p = url.pathname;
-    const hub = () => env.HUB.get(env.HUB.idFromName("hub"));
     const ui = () => new Response(Uint8Array.from(atob(B64), c => c.charCodeAt(0)), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+    const keyOf = () => url.searchParams.get("k") || req.headers.get("x-jam-key") || "";
 
     if (p === "/ws") {
-      const k = url.searchParams.get("k") || "";
+      const k = url.searchParams.get("k") || ""; const authed = Date.now();
       const a = await auth(env, k, url.searchParams.get("room"));
       if (!a) return new Response("nope", { status: 403 });
       const room = a.room; if (!room) return new Response("room required", { status: 400 });
-      const isBridge = a.role === "owner" && url.searchParams.get("role") === "bridge";
+      const isBridge = a.role === "owner" && !a.token && url.searchParams.get("role") === "bridge"; // the host's own key only — an owner-role invite must never become the bridge (sam-security 2026-10-15)
       const isScreen = a.role === "owner" && !a.token && url.searchParams.get("role") === "screen"; // browser.mjs live view: the host's owner key only
       const name = isBridge ? "bridge" : isScreen ? "browser" : (a.name || (url.searchParams.get("name") || "anon")).slice(0, 32);
       const h = new Headers(req.headers);
-      h.set("x-jam-role", isBridge ? "bridge" : isScreen ? "screen" : a.role); h.set("x-jam-name", name); h.set("x-jam-token", a.token); h.set("x-jam-room", room);
-      return env.ROOM.get(env.ROOM.idFromName(room)).fetch(new Request("https://room/ws", { headers: h }));
+      h.set("x-jam-role", isBridge ? "bridge" : isScreen ? "screen" : a.role); h.set("x-jam-name", name); h.set("x-jam-token", a.token); h.set("x-jam-room", room); h.set("x-jam-tenant", a.tenant); h.set("x-jam-authed", String(authed));
+      return roomFor(env, a.tenant, room).fetch(new Request("https://room/ws", { headers: h }));
     }
-    if (p === "/hub") { // bridge + lobby sockets (owner key only)
-      if (!safeEq(url.searchParams.get("k") || "", env.JAM_KEY)) return new Response("nope", { status: 403 });
-      return hub().fetch(req);
+    if (p === "/hub") { // bridge + lobby sockets: a root or host owner key, never an invite
+      const a = await auth(env, url.searchParams.get("k") || "", null);
+      if (!a || a.role !== "owner" || a.token) return new Response("nope", { status: 403 });
+      const h = new Headers(req.headers); h.set("x-jam-tenant", a.tenant);
+      return hubFor(env, a.tenant).fetch(new Request(req, { headers: h }));
     }
     if (p === "/api/whoami") {
       const a = await auth(env, url.searchParams.get("k") || "", url.searchParams.get("room"));
       if (!a) return json({ ok: false }, 403);
       let room = null;
-      if (a.room) { const r = await (await hub().fetch("https://hub/rooms")).json(); room = r.rooms.find(x => x.name === a.room) || { name: a.room }; }
-      return json({ ok: true, role: a.role, name: a.name, room });
+      if (a.room) { const r = await (await hubFor(env, a.tenant).fetch("https://hub/rooms", { headers: tHdr(a.tenant) })).json(); room = r.rooms.find(x => x.name === a.room) || { name: a.room }; }
+      return json({ ok: true, role: a.role, name: a.name, room, host: a.tenant || null, root: isRoot(a), byInvite: !!a.token });
     }
     if (p === "/my-accessible-rooms") {
       const a = await auth(env, url.searchParams.get("k") || "", url.searchParams.get("room"));
       if (!a) return json({ ok: false }, 403);
-      const res = await hub().fetch("https://hub/my-accessible-rooms?role=" + encodeURIComponent(a.role) + "&room=" + encodeURIComponent(a.room || ""));
-      return res;
+      return hubFor(env, a.tenant).fetch("https://hub/my-accessible-rooms?role=" + encodeURIComponent(a.role) + "&room=" + encodeURIComponent(a.room || ""), { headers: tHdr(a.tenant) });
     }
-    if (p === "/api/sponsor") { // GET is public (rendered in every room's UI); POST (set) is owner-only
-      if (req.method === "GET") return hub().fetch(new Request("https://hub/sponsor"));
+    if (p === "/api/sponsor") { // GET is public (rendered in every room's UI, every host's too); POST (set) is the deployment owner's only
+      if (req.method === "GET") return hubFor(env, "").fetch(new Request("https://hub/sponsor", { headers: tHdr("") }));
       if (req.method === "POST") {
-        const a = await auth(env, url.searchParams.get("k") || req.headers.get("x-jam-key") || "", null);
-        if (!a || a.role !== "owner") return json({ ok: false, error: "owner only" }, 403);
-        return hub().fetch(new Request("https://hub/sponsor", req));
+        const a = await auth(env, keyOf(), null);
+        if (!isRoot(a)) return json({ ok: false, error: "owner only" }, 403);
+        return hubFor(env, "").fetch(new Request("https://hub/sponsor", { method: "POST", headers: tHdr(""), body: await req.text() }));
       }
       return bad("method not allowed", 405);
     }
+    if (p === "/api/claim" && req.method === "POST") { // public: a one-time host code + a name + sha256 of a secret made on the claimer's machine
+      const t = await req.text(); if (t.length > 2000) return bad("too large", 413);
+      let b = {}; try { b = JSON.parse(t); } catch { return bad("json body required"); }
+      return regPost(env, "/claim", { code: String(b.code || "").slice(0, 64), tenant: String(b.tenant || "").slice(0, 40), hash: String(b.hash || "").slice(0, 64) });
+    }
+    if (p === "/api/hosts" || p.startsWith("/api/hosts/")) { // the deployment owner's host admin
+      const a = await auth(env, keyOf(), null);
+      if (!isRoot(a)) return json({ ok: false, error: "owner only" }, 403);
+      let m; const b = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+      if (p === "/api/hosts" && req.method === "GET") return regPost(env, "/hosts", {});
+      if (p === "/api/hosts/codes" && req.method === "POST") return regPost(env, "/code", { note: b.note });
+      if ((m = /^\/api\/hosts\/codes\/([a-z0-9]+)$/.exec(p)) && req.method === "DELETE") return regPost(env, "/code-del", { code: m[1] });
+      if ((m = /^\/api\/hosts\/([a-z0-9]{3,20})\/disable$/.exec(p)) && req.method === "POST") {
+        const r = await regPost(env, "/disable", { tenant: m[1], disabled: b.disabled !== false }); if (!r.ok) return r;
+        if (b.disabled !== false) { try { await hubFor(env, m[1]).fetch("https://hub/kick-all", { method: "POST", headers: tHdr(m[1]) }); } catch {} } // live sockets too, not just new ones
+        return json({ ok: true, disabled: b.disabled !== false });
+      }
+      if ((m = /^\/api\/hosts\/([a-z0-9]{3,20})$/.exec(p)) && req.method === "DELETE") { // only a disabled host: wipe their rooms + hub, then forget them (name becomes claimable again)
+        const st = await (await regPost(env, "/hosts", {})).json(); const x = (st.hosts || []).find(h => h.name === m[1]);
+        if (!x) return bad("no such host", 404); if (!x.disabled) return bad("disable the host first", 409);
+        const w = await hubFor(env, m[1]).fetch("https://hub/wipe-all", { method: "POST", headers: tHdr(m[1]) }); if (!w.ok) return bad("wipe failed", 500);
+        return regPost(env, "/delete", { tenant: m[1] });
+      }
+      return bad("not found", 404);
+    }
+    if (p === "/dl/jam.tgz") return new Response(Uint8Array.from(atob(TGZ), c => c.charCodeAt(0)), { headers: { "content-type": "application/gzip", "content-disposition": 'attachment; filename="jam.tgz"', "cache-control": "no-store", "x-robots-tag": "noindex", "x-jam-bridge-build": TGZ_BUILD } });
     if (p === "/api/history" || p === "/api/export") {
       const a = await auth(env, url.searchParams.get("k") || "", url.searchParams.get("room"));
       if (!a || !a.room) return json({ ok: false }, 403);
-      const h = new Headers(); h.set("x-jam-room", a.room);
-      return env.ROOM.get(env.ROOM.idFromName(a.room)).fetch(new Request("https://room" + p.slice(4) + url.search, { headers: h }));
+      const h = new Headers(); h.set("x-jam-room", a.room); h.set("x-jam-tenant", a.tenant);
+      return roomFor(env, a.tenant, a.room).fetch(new Request("https://room" + p.slice(4) + url.search, { headers: h }));
     }
     if (p.startsWith("/api/")) {
-      const a = await auth(env, url.searchParams.get("k") || req.headers.get("x-jam-key") || "", url.searchParams.get("room"));
+      const a = await auth(env, keyOf(), url.searchParams.get("room"));
       if (!a || a.role !== "owner") return json({ ok: false, error: "owner only" }, 403);
       const sub = p.slice(4); // /rooms..., /invites/...
       let m;
-      if (/^\/rooms\/[^/]+\/(activity|presence)$/.test(sub) || /^\/budget\//.test(sub)) return bad("not found", 404); // internal-only: Room.bumpActivity / Room.reportPresence call the Hub DO directly, never through this router
+      if (/^\/rooms\/[^/]+\/(activity|presence)$/.test(sub) || /^\/budget\//.test(sub) || sub === "/kick-all" || sub === "/wipe-all") return bad("not found", 404); // internal-only: Room.bumpActivity / Room.reportPresence / the host-disable path call the Hub DO directly, never through this router
       if (a.token) { // owner-by-token: scoped to their room only
         const okRoom = (m = /^\/rooms\/([^/]+)/.exec(sub)) ? roomName(m[1]) === a.room : false;
         if (!okRoom && sub !== "/rooms" && !/^\/invites\/[^/]+\/budget$/.test(sub)) return json({ ok: false, error: "scoped to " + a.room }, 403); // budget paths: the Hub checks the invite's room via x-jam-scope
         if (sub === "/rooms" && req.method !== "GET") return json({ ok: false, error: "scoped to " + a.room }, 403);
       }
       if ((m = /^\/rooms\/([^/]+)\/drop$/.exec(sub)) && req.method === "POST") { // force every tab in a room to reconnect
-        return env.ROOM.get(env.ROOM.idFromName(roomName(m[1]))).fetch(new Request("https://room/drop", { method: "POST" }));
+        return roomFor(env, a.tenant, roomName(m[1])).fetch(new Request("https://room/drop", { method: "POST", headers: tHdr(a.tenant) }));
       }
       // /api/approve is bridge-side: forward to the room
       if ((m = /^\/approve(?:\/([^/]+))?$/.exec(sub))) {
         const room = roomName(url.searchParams.get("room")); if (!room) return bad("room required");
-        return env.ROOM.get(env.ROOM.idFromName(room)).fetch(new Request("https://room" + sub, req));
+        return roomFor(env, a.tenant, room).fetch(new Request("https://room" + sub, req));
       }
       const fwd = new Request("https://hub" + sub, req); if (a.token) fwd.headers.set("x-jam-scope", a.room); else fwd.headers.delete("x-jam-scope");
-      const res = await hub().fetch(fwd);
+      fwd.headers.set("x-jam-tenant", a.tenant);
+      const res = await hubFor(env, a.tenant).fetch(fwd);
       if (a.token && sub === "/rooms") { const d = await res.json(); return json({ ...d, rooms: (d.rooms || []).filter(r => r.name === a.room) }); }
       return res;
     }
     if (p === "/" || p.startsWith("/r/") || p.startsWith("/j/")) return ui();
-    if (p === "/health") return json({ ok: true, t: Date.now(), build: typeof BUILD === "string" ? BUILD : null });
+    if (p === "/health") return json({ ok: true, t: Date.now(), build: typeof BUILD === "string" ? BUILD : null, bridge: typeof TGZ_BUILD === "string" ? TGZ_BUILD : null });
     return Response.redirect(url.origin + "/", 302);
   }
 };
